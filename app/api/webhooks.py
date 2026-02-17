@@ -1,5 +1,6 @@
 import hashlib
 import hmac
+import json
 import logging
 from datetime import datetime, timezone
 
@@ -56,7 +57,8 @@ async def ig_webhook(request: Request):
         logger.warning("Invalid Instagram webhook signature")
         raise HTTPException(status_code=403, detail="Invalid signature")
 
-    body = await request.json()
+    # Parse from already-read bytes to avoid double read
+    body = json.loads(body_bytes)
 
     # Publish to queue immediately for fast ACK
     await rabbitmq.publish(INBOUND_QUEUE, {
@@ -95,7 +97,7 @@ async def wa_webhook(request: Request):
         logger.warning("Invalid WhatsApp webhook signature")
         raise HTTPException(status_code=403, detail="Invalid signature")
 
-    body = await request.json()
+    body = json.loads(body_bytes)
 
     await rabbitmq.publish(INBOUND_QUEUE, {
         "platform": "whatsapp",
