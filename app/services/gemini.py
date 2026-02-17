@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import Optional
 
@@ -48,7 +49,8 @@ class GeminiService:
                 model_name=settings.gemini_model,
                 system_instruction=system_prompt,
             )
-            response = model.generate_content(contents)
+            # Run blocking Gemini call in a thread to avoid blocking the event loop
+            response = await asyncio.to_thread(model.generate_content, contents)
             await redis_client.record_success("gemini")
             return response.text
 

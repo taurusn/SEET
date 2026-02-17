@@ -77,13 +77,27 @@ async def send_reply(msg: dict) -> None:
         customer_id = msg["customer_id"]
         reply = msg["reply"]
 
+        # Decrypt token once before retry loop
+        try:
+            if platform == "instagram":
+                token = decrypt_token(shop.ig_access_token) if shop.ig_access_token else ""
+            elif platform == "whatsapp":
+                token = decrypt_token(shop.wa_access_token) if shop.wa_access_token else ""
+            else:
+                logger.error("Unknown platform: %s", platform)
+                return
+        except Exception as e:
+            logger.error("Token decryption failed for shop %s: %s", shop.id, e)
+            await update_message_status(db, msg["conversation_id"], reply, "failed")
+            await db.commit()
+            await rabbitmq.move_to_dead_letter(msg, reason=f"Token decryption failed: {e}")
+            return
+
         for attempt in range(MAX_RETRIES):
             try:
                 if platform == "instagram":
-                    token = decrypt_token(shop.ig_access_token) if shop.ig_access_token else ""
                     await send_ig_message(token, customer_id, reply)
                 elif platform == "whatsapp":
-                    token = decrypt_token(shop.wa_access_token) if shop.wa_access_token else ""
                     await send_wa_message(
                         token, shop.wa_phone_number_id, customer_id, reply
                     )

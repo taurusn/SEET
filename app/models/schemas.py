@@ -39,8 +39,8 @@ class Shop(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
-    contexts = relationship("ShopContext", back_populates="shop", lazy="selectin")
-    conversations = relationship("Conversation", back_populates="shop", lazy="selectin")
+    contexts = relationship("ShopContext", back_populates="shop", lazy="select")
+    conversations = relationship("Conversation", back_populates="shop", lazy="select")
 
 
 class ShopContext(Base):
@@ -70,8 +70,8 @@ class Conversation(Base):
     )
 
     shop = relationship("Shop", back_populates="conversations")
-    messages = relationship("Message", back_populates="conversation", lazy="selectin")
-    handoff_requests = relationship("HandoffRequest", back_populates="conversation", lazy="selectin")
+    messages = relationship("Message", back_populates="conversation", lazy="select")
+    handoff_requests = relationship("HandoffRequest", back_populates="conversation", lazy="select")
 
 
 class Message(Base):

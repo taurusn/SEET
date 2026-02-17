@@ -39,11 +39,11 @@ async def identify_shop(
     """Find the shop by Instagram page_id or WhatsApp phone_number_id."""
     if platform == "instagram":
         stmt = select(Shop).where(
-            Shop.ig_page_id == identifier, Shop.is_active.is_(True)
+            Shop.ig_page_id == identifier, Shop.is_active == True  # noqa: E712
         )
     else:
         stmt = select(Shop).where(
-            Shop.wa_phone_number_id == identifier, Shop.is_active.is_(True)
+            Shop.wa_phone_number_id == identifier, Shop.is_active == True  # noqa: E712
         )
     result = await db.execute(stmt)
     return result.scalar_one_or_none()
@@ -169,74 +169,81 @@ async def process_message(msg: dict) -> None:
         logger.debug("No actionable messages in payload")
         return
 
-    async with async_session_factory() as db:
-        for item in extracted:
-            meta_message_id = item.get("meta_message_id", "")
+    for item in extracted:
+        meta_message_id = item.get("meta_message_id", "")
 
-            # Deduplication check
-            if meta_message_id and await redis_client.is_duplicate_message(meta_message_id):
-                logger.info("Duplicate message skipped: %s", meta_message_id)
-                continue
+        # Deduplication check
+        if meta_message_id and await redis_client.is_duplicate_message(meta_message_id):
+            logger.info("Duplicate message skipped: %s", meta_message_id)
+            continue
 
-            # Identify shop
-            if platform == "instagram":
-                identifier = item.get("page_id", "")
-            else:
-                identifier = item.get("phone_number_id", "")
+        # Process each message in its own DB session for isolation
+        try:
+            async with async_session_factory() as db:
+                # Identify shop
+                if platform == "instagram":
+                    identifier = item.get("page_id", "")
+                else:
+                    identifier = item.get("phone_number_id", "")
 
-            shop = await identify_shop(db, platform, identifier)
-            if not shop:
-                logger.warning("No active shop found for %s: %s", platform, identifier)
-                continue
+                shop = await identify_shop(db, platform, identifier)
+                if not shop:
+                    logger.warning("No active shop found for %s: %s", platform, identifier)
+                    continue
 
-            # Rate limiting
-            if not await redis_client.check_rate_limit(str(shop.id)):
-                logger.warning("Rate limit exceeded for shop %s", shop.id)
-                continue
+                # Rate limiting
+                if not await redis_client.check_rate_limit(str(shop.id)):
+                    logger.warning("Rate limit exceeded for shop %s", shop.id)
+                    continue
 
-            customer_id = item.get("sender_id", item.get("wa_id", ""))
-            text = item.get("text", "")
+                customer_id = item.get("sender_id", item.get("wa_id", ""))
+                text = item.get("text", "")
 
-            # Get or create conversation
-            convo = await get_or_create_conversation(db, shop.id, platform, customer_id)
+                # Get or create conversation
+                convo = await get_or_create_conversation(db, shop.id, platform, customer_id)
 
-            # Save inbound message
-            await save_message(
-                db, convo.id, "inbound", text, "customer", meta_message_id
+                # Save inbound message
+                await save_message(
+                    db, convo.id, "inbound", text, "customer", meta_message_id
+                )
+
+                # If human handoff is active, skip AI
+                if convo.status == "human":
+                    logger.info("Conversation %s in human mode, skipping AI", convo.id)
+                    await db.commit()
+                    continue
+
+                # Check for handoff triggers
+                if needs_human_handoff(text):
+                    await trigger_handoff(db, str(convo.id), reason=f"Customer said: {text}")
+                    reply = HANDOFF_REPLY
+                else:
+                    # Load context and history, then generate reply
+                    context = await get_shop_context(db, shop)
+                    history = await get_recent_messages(db, convo.id)
+                    reply = await gemini_service.generate_reply(context, history, text)
+
+                # Save outbound message
+                await save_message(db, convo.id, "outbound", reply, "ai")
+                await db.commit()
+
+                # Push to outbound queue (after commit so DB state is consistent)
+                await rabbitmq.publish(OUTBOUND_QUEUE, {
+                    "conversation_id": str(convo.id),
+                    "platform": platform,
+                    "customer_id": customer_id,
+                    "shop_id": str(shop.id),
+                    "reply": reply,
+                })
+
+                logger.info(
+                    "Processed message for shop=%s convo=%s", shop.id, convo.id
+                )
+
+        except Exception as e:
+            logger.exception(
+                "Failed to process message %s: %s", meta_message_id, e
             )
-
-            # If human handoff is active, skip AI
-            if convo.status == "human":
-                logger.info("Conversation %s in human mode, skipping AI", convo.id)
-                continue
-
-            # Check for handoff triggers
-            if needs_human_handoff(text):
-                await trigger_handoff(db, str(convo.id), reason=f"Customer said: {text}")
-                reply = HANDOFF_REPLY
-            else:
-                # Load context and history, then generate reply
-                context = await get_shop_context(db, shop)
-                history = await get_recent_messages(db, convo.id)
-                reply = await gemini_service.generate_reply(context, history, text)
-
-            # Save outbound message
-            await save_message(db, convo.id, "outbound", reply, "ai")
-
-            # Push to outbound queue
-            await rabbitmq.publish(OUTBOUND_QUEUE, {
-                "conversation_id": str(convo.id),
-                "platform": platform,
-                "customer_id": customer_id,
-                "shop_id": str(shop.id),
-                "reply": reply,
-            })
-
-            logger.info(
-                "Processed message for shop=%s convo=%s", shop.id, convo.id
-            )
-
-        await db.commit()
 
 
 async def main() -> None:
