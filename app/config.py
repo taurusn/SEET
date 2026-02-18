@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     # Encryption
     encryption_key: str = ""
 
+    # JWT
+    jwt_secret: str = ""
+
     # App
     app_env: str = "development"
     log_level: str = "INFO"

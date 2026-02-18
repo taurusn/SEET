@@ -228,3 +228,4 @@ class OutboundQueueMessage(BaseModel):
     customer_id: str
     shop_id: str
     reply: str
+    message_id: str

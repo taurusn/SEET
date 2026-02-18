@@ -9,7 +9,7 @@ Run with: python -m app.workers.reply_worker
 import asyncio
 import logging
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.database import async_session_factory
@@ -36,20 +36,10 @@ async def get_shop(db: AsyncSession, shop_id: str) -> Shop | None:
 
 
 async def update_message_status(
-    db: AsyncSession, conversation_id: str, reply_text: str, status: str
+    db: AsyncSession, message_id: str, status: str
 ) -> None:
-    """Update the status of the most recent outbound message matching the reply."""
-    stmt = (
-        select(Message)
-        .where(
-            Message.conversation_id == conversation_id,
-            Message.direction == "outbound",
-            Message.content == reply_text,
-            Message.status == "pending",
-        )
-        .order_by(Message.created_at.desc())
-        .limit(1)
-    )
+    """Update the status of an outbound message by its unique ID."""
+    stmt = select(Message).where(Message.id == message_id)
     result = await db.execute(stmt)
     msg = result.scalar_one_or_none()
     if msg:
@@ -67,6 +57,8 @@ async def refresh_token(db: AsyncSession, shop: Shop) -> None:
 
 async def send_reply(msg: dict) -> None:
     """Send a single reply to the customer with retry logic."""
+    message_id = msg.get("message_id", "")
+
     async with async_session_factory() as db:
         shop = await get_shop(db, msg["shop_id"])
         if not shop:
@@ -88,8 +80,9 @@ async def send_reply(msg: dict) -> None:
                 return
         except Exception as e:
             logger.error("Token decryption failed for shop %s: %s", shop.id, e)
-            await update_message_status(db, msg["conversation_id"], reply, "failed")
-            await db.commit()
+            if message_id:
+                await update_message_status(db, message_id, "failed")
+                await db.commit()
             await rabbitmq.move_to_dead_letter(msg, reason=f"Token decryption failed: {e}")
             return
 
@@ -102,8 +95,9 @@ async def send_reply(msg: dict) -> None:
                         token, shop.wa_phone_number_id, customer_id, reply
                     )
 
-                await update_message_status(db, msg["conversation_id"], reply, "sent")
-                await db.commit()
+                if message_id:
+                    await update_message_status(db, message_id, "sent")
+                    await db.commit()
                 logger.info(
                     "Reply sent: platform=%s customer=%s attempt=%d",
                     platform, customer_id, attempt + 1,
@@ -127,8 +121,9 @@ async def send_reply(msg: dict) -> None:
 
         # All retries exhausted — move to dead letter queue
         logger.error("All retries failed for message to %s, moving to DLQ", customer_id)
-        await update_message_status(db, msg["conversation_id"], reply, "failed")
-        await db.commit()
+        if message_id:
+            await update_message_status(db, message_id, "failed")
+            await db.commit()
 
         await rabbitmq.move_to_dead_letter(msg, reason="Max retries exceeded")
 

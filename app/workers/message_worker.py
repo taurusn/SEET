@@ -30,7 +30,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-HANDOFF_REPLY = "I'll connect you with our team right away 🙏"
+HANDOFF_REPLY = "أبشر، بحولك على الفريق الحين 🙏"
 
 
 async def identify_shop(
@@ -52,7 +52,13 @@ async def identify_shop(
 async def get_or_create_conversation(
     db: AsyncSession, shop_id: uuid.UUID, platform: str, customer_id: str
 ) -> Conversation:
-    """Get an existing conversation or create a new one."""
+    """Get an existing conversation or create a new one.
+
+    Handles the race condition where two workers may try to create
+    the same conversation simultaneously by catching IntegrityError.
+    """
+    from sqlalchemy.exc import IntegrityError
+
     stmt = select(Conversation).where(
         Conversation.shop_id == shop_id,
         Conversation.platform == platform,
@@ -62,15 +68,23 @@ async def get_or_create_conversation(
     convo = result.scalar_one_or_none()
 
     if not convo:
-        convo = Conversation(
-            shop_id=shop_id,
-            platform=platform,
-            customer_id=customer_id,
-            status="ai",
-        )
-        db.add(convo)
-        await db.flush()
-        logger.info("New conversation created: %s", convo.id)
+        try:
+            convo = Conversation(
+                shop_id=shop_id,
+                platform=platform,
+                customer_id=customer_id,
+                status="ai",
+            )
+            db.add(convo)
+            await db.flush()
+            logger.info("New conversation created: %s", convo.id)
+        except IntegrityError:
+            # Another worker created it first — rollback and re-fetch
+            await db.rollback()
+            result = await db.execute(stmt)
+            convo = result.scalar_one_or_none()
+            if not convo:
+                raise  # something else went wrong
 
     return convo
 
@@ -224,7 +238,7 @@ async def process_message(msg: dict) -> None:
                     reply = await gemini_service.generate_reply(context, history, text)
 
                 # Save outbound message
-                await save_message(db, convo.id, "outbound", reply, "ai")
+                outbound_msg = await save_message(db, convo.id, "outbound", reply, "ai")
                 await db.commit()
 
                 # Push to outbound queue (after commit so DB state is consistent)
@@ -234,6 +248,7 @@ async def process_message(msg: dict) -> None:
                     "customer_id": customer_id,
                     "shop_id": str(shop.id),
                     "reply": reply,
+                    "message_id": str(outbound_msg.id),
                 })
 
                 logger.info(

@@ -1,7 +1,8 @@
 """
 Dashboard API — shop owner management endpoints.
 
-Provides CRUD for shops, shop context, conversations, and handoff management.
+All endpoints are JWT-protected and tenant-isolated.
+A shop owner can only access their own data.
 """
 
 import uuid
@@ -30,15 +31,22 @@ from app.models.schemas import (
 from app.services.encryption import encrypt_token
 from app.services.redis_client import redis_client
 from app.services.handoff import resolve_handoff
+from app.api.auth import (
+    get_current_shop,
+    get_current_shop_id,
+    create_access_token,
+    TokenResponse,
+)
 
-router = APIRouter(prefix="/api", tags=["dashboard"])
+router = APIRouter(prefix="/api/v1", tags=["dashboard"])
 
 
-# ─── Shops ───────────────────────────────────────────────────────────────────
+# ─── Auth ─────────────────────────────────────────────────────────────────────
 
 
-@router.post("/shops", response_model=ShopResponse, status_code=201)
-async def create_shop(data: ShopCreate, db: AsyncSession = Depends(get_db)):
+@router.post("/shops", response_model=TokenResponse, status_code=201)
+async def register_shop(data: ShopCreate, db: AsyncSession = Depends(get_db)):
+    """Register a new shop and return a JWT for future requests."""
     shop = Shop(
         name=data.name,
         ig_page_id=data.ig_page_id,
@@ -49,44 +57,36 @@ async def create_shop(data: ShopCreate, db: AsyncSession = Depends(get_db)):
     )
     db.add(shop)
     await db.flush()
+
+    return create_access_token(shop.id)
+
+
+@router.post("/auth/token", response_model=TokenResponse)
+async def refresh_shop_token(
+    shop: Shop = Depends(get_current_shop),
+):
+    """Issue a new JWT for an authenticated shop."""
+    return create_access_token(shop.id)
+
+
+# ─── Shop (own profile) ──────────────────────────────────────────────────────
+
+
+@router.get("/shop", response_model=ShopResponse)
+async def get_my_shop(shop: Shop = Depends(get_current_shop)):
+    """Get the authenticated shop's profile."""
     return shop
 
 
-@router.get("/shops", response_model=list[ShopResponse])
-async def list_shops(
-    is_active: Optional[bool] = None,
+@router.patch("/shop", response_model=ShopResponse)
+async def update_my_shop(
+    data: ShopUpdate,
+    shop: Shop = Depends(get_current_shop),
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = select(Shop)
-    if is_active is not None:
-        stmt = stmt.where(Shop.is_active == is_active)
-    stmt = stmt.order_by(Shop.created_at.desc())
-    result = await db.execute(stmt)
-    return result.scalars().all()
-
-
-@router.get("/shops/{shop_id}", response_model=ShopResponse)
-async def get_shop(shop_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
-    stmt = select(Shop).where(Shop.id == shop_id)
-    result = await db.execute(stmt)
-    shop = result.scalar_one_or_none()
-    if not shop:
-        raise HTTPException(status_code=404, detail="Shop not found")
-    return shop
-
-
-@router.patch("/shops/{shop_id}", response_model=ShopResponse)
-async def update_shop(
-    shop_id: uuid.UUID, data: ShopUpdate, db: AsyncSession = Depends(get_db)
-):
-    stmt = select(Shop).where(Shop.id == shop_id)
-    result = await db.execute(stmt)
-    shop = result.scalar_one_or_none()
-    if not shop:
-        raise HTTPException(status_code=404, detail="Shop not found")
-
+    """Update the authenticated shop's profile."""
     update_data = data.model_dump(exclude_unset=True)
-    # Encrypt tokens if provided
+
     if "ig_access_token" in update_data and update_data["ig_access_token"]:
         update_data["ig_access_token"] = encrypt_token(update_data["ig_access_token"])
     if "wa_access_token" in update_data and update_data["wa_access_token"]:
@@ -96,31 +96,19 @@ async def update_shop(
         setattr(shop, key, value)
 
     await db.flush()
-
-    # Invalidate cached context
-    await redis_client.invalidate_shop_context(str(shop_id))
+    await redis_client.invalidate_shop_context(str(shop.id))
     return shop
 
 
 # ─── Shop Context ────────────────────────────────────────────────────────────
 
 
-@router.post(
-    "/shops/{shop_id}/context",
-    response_model=ShopContextResponse,
-    status_code=201,
-)
+@router.post("/shop/context", response_model=ShopContextResponse, status_code=201)
 async def add_shop_context(
-    shop_id: uuid.UUID,
     data: ShopContextCreate,
+    shop_id: uuid.UUID = Depends(get_current_shop_id),
     db: AsyncSession = Depends(get_db),
 ):
-    # Verify shop exists
-    shop_stmt = select(Shop).where(Shop.id == shop_id)
-    shop_result = await db.execute(shop_stmt)
-    if not shop_result.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Shop not found")
-
     ctx = ShopContext(
         shop_id=shop_id,
         context_type=data.context_type,
@@ -133,22 +121,20 @@ async def add_shop_context(
     return ctx
 
 
-@router.get(
-    "/shops/{shop_id}/context",
-    response_model=list[ShopContextResponse],
-)
+@router.get("/shop/context", response_model=list[ShopContextResponse])
 async def list_shop_context(
-    shop_id: uuid.UUID, db: AsyncSession = Depends(get_db)
+    shop_id: uuid.UUID = Depends(get_current_shop_id),
+    db: AsyncSession = Depends(get_db),
 ):
     stmt = select(ShopContext).where(ShopContext.shop_id == shop_id)
     result = await db.execute(stmt)
     return result.scalars().all()
 
 
-@router.delete("/shops/{shop_id}/context/{context_id}", status_code=204)
+@router.delete("/shop/context/{context_id}", status_code=204)
 async def delete_shop_context(
-    shop_id: uuid.UUID,
     context_id: uuid.UUID,
+    shop_id: uuid.UUID = Depends(get_current_shop_id),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(ShopContext).where(
@@ -159,6 +145,7 @@ async def delete_shop_context(
     if not ctx:
         raise HTTPException(status_code=404, detail="Context not found")
     await db.delete(ctx)
+    await db.flush()
 
     await redis_client.invalidate_shop_context(str(shop_id))
 
@@ -166,16 +153,13 @@ async def delete_shop_context(
 # ─── Conversations ───────────────────────────────────────────────────────────
 
 
-@router.get(
-    "/shops/{shop_id}/conversations",
-    response_model=list[ConversationResponse],
-)
+@router.get("/shop/conversations", response_model=list[ConversationResponse])
 async def list_conversations(
-    shop_id: uuid.UUID,
     status: Optional[str] = None,
     platform: Optional[str] = None,
     limit: int = Query(50, le=200),
     offset: int = 0,
+    shop_id: uuid.UUID = Depends(get_current_shop_id),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(Conversation).where(Conversation.shop_id == shop_id)
@@ -188,16 +172,23 @@ async def list_conversations(
     return result.scalars().all()
 
 
-@router.get(
-    "/conversations/{conversation_id}/messages",
-    response_model=list[MessageResponse],
-)
+@router.get("/shop/conversations/{conversation_id}/messages", response_model=list[MessageResponse])
 async def get_conversation_messages(
     conversation_id: uuid.UUID,
     limit: int = Query(50, le=200),
     offset: int = 0,
+    shop_id: uuid.UUID = Depends(get_current_shop_id),
     db: AsyncSession = Depends(get_db),
 ):
+    # Verify the conversation belongs to this shop
+    convo_stmt = select(Conversation).where(
+        Conversation.id == conversation_id,
+        Conversation.shop_id == shop_id,
+    )
+    convo_result = await db.execute(convo_stmt)
+    if not convo_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
     stmt = (
         select(Message)
         .where(Message.conversation_id == conversation_id)
@@ -212,13 +203,10 @@ async def get_conversation_messages(
 # ─── Handoff Management ──────────────────────────────────────────────────────
 
 
-@router.get(
-    "/shops/{shop_id}/handoffs",
-    response_model=list[HandoffRequestResponse],
-)
+@router.get("/shop/handoffs", response_model=list[HandoffRequestResponse])
 async def list_handoffs(
-    shop_id: uuid.UUID,
     pending_only: bool = True,
+    shop_id: uuid.UUID = Depends(get_current_shop_id),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = (
@@ -233,11 +221,18 @@ async def list_handoffs(
     return result.scalars().all()
 
 
-@router.post("/handoffs/{handoff_id}/resolve", status_code=200)
+@router.post("/shop/handoffs/{handoff_id}/resolve", status_code=200)
 async def resolve_handoff_endpoint(
-    handoff_id: uuid.UUID, db: AsyncSession = Depends(get_db)
+    handoff_id: uuid.UUID,
+    shop_id: uuid.UUID = Depends(get_current_shop_id),
+    db: AsyncSession = Depends(get_db),
 ):
-    stmt = select(HandoffRequest).where(HandoffRequest.id == handoff_id)
+    # Verify the handoff belongs to this shop
+    stmt = (
+        select(HandoffRequest)
+        .join(Conversation)
+        .where(HandoffRequest.id == handoff_id, Conversation.shop_id == shop_id)
+    )
     result = await db.execute(stmt)
     handoff = result.scalar_one_or_none()
     if not handoff:
@@ -250,24 +245,22 @@ async def resolve_handoff_endpoint(
 # ─── Stats ───────────────────────────────────────────────────────────────────
 
 
-@router.get("/shops/{shop_id}/stats")
+@router.get("/shop/stats")
 async def get_shop_stats(
-    shop_id: uuid.UUID, db: AsyncSession = Depends(get_db)
+    shop_id: uuid.UUID = Depends(get_current_shop_id),
+    db: AsyncSession = Depends(get_db),
 ):
-    # Total conversations
     convo_count = await db.execute(
         select(func.count()).select_from(Conversation).where(
             Conversation.shop_id == shop_id
         )
     )
-    # Total messages
     msg_count = await db.execute(
         select(func.count())
         .select_from(Message)
         .join(Conversation)
         .where(Conversation.shop_id == shop_id)
     )
-    # Active handoffs
     handoff_count = await db.execute(
         select(func.count())
         .select_from(HandoffRequest)
