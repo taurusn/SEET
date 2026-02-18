@@ -39,6 +39,17 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  dlq-worker:
+    build: .
+    command: python -m app.workers.dlq_worker
+    env_file: .env
+    depends_on:
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
   db:
     image: postgres:16-alpine
     environment:
