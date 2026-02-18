@@ -8,6 +8,7 @@ import logging
 
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.api.webhooks import router as webhook_router
@@ -48,6 +49,18 @@ app = FastAPI(
     description="Multi-tenant AI messaging platform for Instagram & WhatsApp",
     version="1.0.0",
     lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        settings.frontend_url,
+        "https://*.trycloudflare.com",
+    ],
+    allow_origin_regex=r"https://.*\.trycloudflare\.com",
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 app.include_router(webhook_router)

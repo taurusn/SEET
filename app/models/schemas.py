@@ -9,6 +9,8 @@ from sqlalchemy import (
     Column,
     DateTime,
     ForeignKey,
+    Integer,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -100,6 +102,44 @@ class HandoffRequest(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     conversation = relationship("Conversation", back_populates="handoff_requests")
+
+
+class CompensationTier(Base):
+    __tablename__ = "compensation_tiers"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    shop_id = Column(UUID(as_uuid=True), ForeignKey("shops.id"), nullable=False)
+    label = Column(String(255), nullable=False)  # e.g. "مشروب مجاني"
+    description = Column(Text, nullable=True)
+    value_sar = Column(Numeric(10, 2), nullable=False)
+    validity_days = Column(Integer, nullable=False, default=30)
+    tier_order = Column(Integer, nullable=False, default=0)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    shop = relationship("Shop", backref="compensation_tiers")
+    vouchers = relationship("Voucher", back_populates="tier", lazy="select")
+
+
+class Voucher(Base):
+    __tablename__ = "vouchers"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    shop_id = Column(UUID(as_uuid=True), ForeignKey("shops.id"), nullable=False)
+    tier_id = Column(UUID(as_uuid=True), ForeignKey("compensation_tiers.id"), nullable=False)
+    conversation_id = Column(UUID(as_uuid=True), ForeignKey("conversations.id"), nullable=False)
+    handoff_id = Column(UUID(as_uuid=True), ForeignKey("handoff_requests.id"), nullable=True)
+    code = Column(String(20), unique=True, nullable=False)
+    customer_id = Column(String(255), nullable=False)
+    platform = Column(String(20), nullable=False)
+    status = Column(String(20), default="issued")  # 'issued', 'redeemed', 'expired'
+    issued_at = Column(DateTime(timezone=True), server_default=func.now())
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    redeemed_at = Column(DateTime(timezone=True), nullable=True)
+
+    shop = relationship("Shop", backref="vouchers")
+    tier = relationship("CompensationTier", back_populates="vouchers")
+    conversation = relationship("Conversation", backref="vouchers")
 
 
 # ─── Pydantic Schemas ────────────────────────────────────────────────────────
@@ -229,3 +269,76 @@ class OutboundQueueMessage(BaseModel):
     shop_id: str
     reply: str
     message_id: str
+
+
+# ─── Compensation & Voucher Schemas ──────────────────────────────────────────
+
+
+class VoucherStatusEnum(str, Enum):
+    issued = "issued"
+    redeemed = "redeemed"
+    expired = "expired"
+
+
+class CompensationTierCreate(BaseModel):
+    label: str
+    description: Optional[str] = None
+    value_sar: float
+    validity_days: int = 30
+    tier_order: int = 0
+
+
+class CompensationTierUpdate(BaseModel):
+    label: Optional[str] = None
+    description: Optional[str] = None
+    value_sar: Optional[float] = None
+    validity_days: Optional[int] = None
+    tier_order: Optional[int] = None
+    is_active: Optional[bool] = None
+
+
+class CompensationTierResponse(BaseModel):
+    id: uuid.UUID
+    shop_id: uuid.UUID
+    label: str
+    description: Optional[str] = None
+    value_sar: float
+    validity_days: int
+    tier_order: int
+    is_active: bool
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class VoucherIssue(BaseModel):
+    tier_id: uuid.UUID
+    conversation_id: uuid.UUID
+    handoff_id: Optional[uuid.UUID] = None
+    customer_id: str
+    platform: str
+
+
+class VoucherResponse(BaseModel):
+    id: uuid.UUID
+    shop_id: uuid.UUID
+    tier_id: uuid.UUID
+    conversation_id: uuid.UUID
+    handoff_id: Optional[uuid.UUID] = None
+    code: str
+    customer_id: str
+    platform: str
+    status: str
+    issued_at: datetime
+    expires_at: datetime
+    redeemed_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class VoucherStatsResponse(BaseModel):
+    total_issued: int
+    total_redeemed: int
+    total_expired: int
+    total_active: int
+    budget_spent_sar: float
