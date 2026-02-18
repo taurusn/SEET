@@ -6,10 +6,11 @@ A shop owner can only access their own data.
 """
 
 import uuid
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, func
+from sqlalchemy import select, func, case
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.database import get_db
@@ -19,6 +20,8 @@ from app.models.schemas import (
     Conversation,
     Message,
     HandoffRequest,
+    CompensationTier,
+    Voucher,
     ShopCreate,
     ShopUpdate,
     ShopResponse,
@@ -27,10 +30,17 @@ from app.models.schemas import (
     ConversationResponse,
     MessageResponse,
     HandoffRequestResponse,
+    CompensationTierCreate,
+    CompensationTierUpdate,
+    CompensationTierResponse,
+    VoucherIssue,
+    VoucherResponse,
+    VoucherStatsResponse,
 )
 from app.services.encryption import encrypt_token
 from app.services.redis_client import redis_client
 from app.services.handoff import resolve_handoff
+from app.services.voucher import generate_voucher_code, is_voucher_expired
 from app.api.auth import (
     get_current_shop,
     get_current_shop_id,
@@ -271,8 +281,237 @@ async def get_shop_stats(
         )
     )
 
+    voucher_count = await db.execute(
+        select(func.count())
+        .select_from(Voucher)
+        .where(Voucher.shop_id == shop_id, Voucher.status == "issued")
+    )
+
     return {
         "total_conversations": convo_count.scalar(),
         "total_messages": msg_count.scalar(),
         "active_handoffs": handoff_count.scalar(),
+        "active_vouchers": voucher_count.scalar(),
     }
+
+
+# ─── Compensation Tiers ─────────────────────────────────────────────────────
+
+
+@router.post("/shop/compensation-tiers", response_model=CompensationTierResponse, status_code=201)
+async def create_compensation_tier(
+    data: CompensationTierCreate,
+    shop_id: uuid.UUID = Depends(get_current_shop_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a new compensation tier for this shop."""
+    tier = CompensationTier(
+        shop_id=shop_id,
+        label=data.label,
+        description=data.description,
+        value_sar=data.value_sar,
+        validity_days=data.validity_days,
+        tier_order=data.tier_order,
+    )
+    db.add(tier)
+    await db.flush()
+    return tier
+
+
+@router.get("/shop/compensation-tiers", response_model=list[CompensationTierResponse])
+async def list_compensation_tiers(
+    shop_id: uuid.UUID = Depends(get_current_shop_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """List all compensation tiers for this shop."""
+    stmt = (
+        select(CompensationTier)
+        .where(CompensationTier.shop_id == shop_id)
+        .order_by(CompensationTier.tier_order.asc())
+    )
+    result = await db.execute(stmt)
+    return result.scalars().all()
+
+
+@router.patch("/shop/compensation-tiers/{tier_id}", response_model=CompensationTierResponse)
+async def update_compensation_tier(
+    tier_id: uuid.UUID,
+    data: CompensationTierUpdate,
+    shop_id: uuid.UUID = Depends(get_current_shop_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update a compensation tier."""
+    stmt = select(CompensationTier).where(
+        CompensationTier.id == tier_id, CompensationTier.shop_id == shop_id
+    )
+    result = await db.execute(stmt)
+    tier = result.scalar_one_or_none()
+    if not tier:
+        raise HTTPException(status_code=404, detail="Tier not found")
+
+    for key, value in data.model_dump(exclude_unset=True).items():
+        setattr(tier, key, value)
+    await db.flush()
+    return tier
+
+
+@router.delete("/shop/compensation-tiers/{tier_id}", status_code=204)
+async def delete_compensation_tier(
+    tier_id: uuid.UUID,
+    shop_id: uuid.UUID = Depends(get_current_shop_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete a compensation tier."""
+    stmt = select(CompensationTier).where(
+        CompensationTier.id == tier_id, CompensationTier.shop_id == shop_id
+    )
+    result = await db.execute(stmt)
+    tier = result.scalar_one_or_none()
+    if not tier:
+        raise HTTPException(status_code=404, detail="Tier not found")
+    await db.delete(tier)
+    await db.flush()
+
+
+# ─── Vouchers ───────────────────────────────────────────────────────────────
+
+
+@router.post("/shop/vouchers", response_model=VoucherResponse, status_code=201)
+async def issue_voucher(
+    data: VoucherIssue,
+    shop: Shop = Depends(get_current_shop),
+    db: AsyncSession = Depends(get_db),
+):
+    """Issue a voucher to a customer (approve compensation)."""
+    # Verify tier belongs to this shop
+    tier_stmt = select(CompensationTier).where(
+        CompensationTier.id == data.tier_id, CompensationTier.shop_id == shop.id
+    )
+    tier_result = await db.execute(tier_stmt)
+    tier = tier_result.scalar_one_or_none()
+    if not tier:
+        raise HTTPException(status_code=404, detail="Compensation tier not found")
+
+    # Verify conversation belongs to this shop
+    convo_stmt = select(Conversation).where(
+        Conversation.id == data.conversation_id, Conversation.shop_id == shop.id
+    )
+    convo_result = await db.execute(convo_stmt)
+    if not convo_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    # Generate unique code using shop name as prefix
+    prefix = shop.name[:4].upper().replace(" ", "")
+    if len(prefix) < 3:
+        prefix = "CAFE"
+    code = generate_voucher_code(prefix)
+
+    voucher = Voucher(
+        shop_id=shop.id,
+        tier_id=data.tier_id,
+        conversation_id=data.conversation_id,
+        handoff_id=data.handoff_id,
+        code=code,
+        customer_id=data.customer_id,
+        platform=data.platform,
+        expires_at=datetime.now(timezone.utc) + timedelta(days=tier.validity_days),
+    )
+    db.add(voucher)
+    await db.flush()
+    return voucher
+
+
+@router.get("/shop/vouchers", response_model=list[VoucherResponse])
+async def list_vouchers(
+    status: Optional[str] = None,
+    limit: int = Query(50, le=200),
+    offset: int = 0,
+    shop_id: uuid.UUID = Depends(get_current_shop_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """List vouchers for this shop, optionally filtered by status."""
+    stmt = select(Voucher).where(Voucher.shop_id == shop_id)
+    if status:
+        stmt = stmt.where(Voucher.status == status)
+    stmt = stmt.order_by(Voucher.issued_at.desc()).limit(limit).offset(offset)
+    result = await db.execute(stmt)
+    return result.scalars().all()
+
+
+@router.post("/shop/vouchers/{voucher_id}/redeem", response_model=VoucherResponse)
+async def redeem_voucher(
+    voucher_id: uuid.UUID,
+    shop_id: uuid.UUID = Depends(get_current_shop_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Mark a voucher as redeemed."""
+    stmt = select(Voucher).where(
+        Voucher.id == voucher_id, Voucher.shop_id == shop_id
+    )
+    result = await db.execute(stmt)
+    voucher = result.scalar_one_or_none()
+    if not voucher:
+        raise HTTPException(status_code=404, detail="Voucher not found")
+    if voucher.status == "redeemed":
+        raise HTTPException(status_code=400, detail="Voucher already redeemed")
+    if is_voucher_expired(voucher.expires_at):
+        voucher.status = "expired"
+        await db.flush()
+        raise HTTPException(status_code=400, detail="Voucher has expired")
+
+    voucher.status = "redeemed"
+    voucher.redeemed_at = datetime.now(timezone.utc)
+    await db.flush()
+    return voucher
+
+
+@router.get("/shop/voucher-stats", response_model=VoucherStatsResponse)
+async def get_voucher_stats(
+    shop_id: uuid.UUID = Depends(get_current_shop_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get voucher statistics for this shop (current month)."""
+    month_start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    base = select(Voucher).where(
+        Voucher.shop_id == shop_id,
+        Voucher.issued_at >= month_start,
+    )
+
+    total = await db.execute(select(func.count()).select_from(base.subquery()))
+    redeemed = await db.execute(
+        select(func.count()).select_from(
+            base.where(Voucher.status == "redeemed").subquery()
+        )
+    )
+    expired = await db.execute(
+        select(func.count()).select_from(
+            base.where(Voucher.status == "expired").subquery()
+        )
+    )
+    active = await db.execute(
+        select(func.count()).select_from(
+            base.where(Voucher.status == "issued").subquery()
+        )
+    )
+
+    # Budget spent = sum of tier values for redeemed vouchers this month
+    budget_stmt = (
+        select(func.coalesce(func.sum(CompensationTier.value_sar), 0))
+        .select_from(Voucher)
+        .join(CompensationTier)
+        .where(
+            Voucher.shop_id == shop_id,
+            Voucher.issued_at >= month_start,
+            Voucher.status == "redeemed",
+        )
+    )
+    budget_result = await db.execute(budget_stmt)
+
+    return VoucherStatsResponse(
+        total_issued=total.scalar() or 0,
+        total_redeemed=redeemed.scalar() or 0,
+        total_expired=expired.scalar() or 0,
+        total_active=active.scalar() or 0,
+        budget_spent_sar=float(budget_result.scalar() or 0),
+    )

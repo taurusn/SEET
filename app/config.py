@@ -27,11 +27,14 @@ class Settings(BaseSettings):
     # JWT
     jwt_secret: str = ""
 
+    # Frontend
+    frontend_url: str = "http://localhost:3000"
+
     # App
     app_env: str = "development"
     log_level: str = "INFO"
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
 
 @lru_cache
