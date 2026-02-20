@@ -22,18 +22,14 @@ export default function LoginPage() {
     const shopId = form.get("shop_id") as string;
 
     try {
-      // Use the refresh token endpoint with existing JWT
-      // For simplicity: shop registers once, uses shop_id + stored token
       const res = await api.post<{
         access_token: string;
         shop_id: string;
-      }>("/api/v1/auth/token", null);
+      }>("/api/v1/auth/login", { name: shopId });
       await login(res.shop_id, res.access_token);
       router.push("/");
     } catch {
-      // If no valid token, try with shop_id directly
-      // The API uses JWT — for login we need the shop to re-auth
-      setError("يرجى التسجيل أولاً أو التحقق من بيانات الدخول");
+      setError("اسم المحل غير موجود");
     } finally {
       setLoading(false);
     }
@@ -54,13 +50,13 @@ export default function LoginPage() {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-sm font-medium mb-1.5">
-                معرّف المحل (Shop ID)
+                اسم المحل
               </label>
               <input
                 name="shop_id"
                 type="text"
                 required
-                placeholder="أدخل معرّف المحل"
+                placeholder="أدخل اسم المحل"
                 className="w-full px-4 py-2.5 rounded-xl border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
               />
             </div>

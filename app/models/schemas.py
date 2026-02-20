@@ -342,3 +342,17 @@ class VoucherStatsResponse(BaseModel):
     total_expired: int
     total_active: int
     budget_spent_sar: float
+
+
+# ─── Playground Schemas ──────────────────────────────────────────────────────
+
+
+class PlaygroundChatRequest(BaseModel):
+    conversation_id: uuid.UUID
+    message: str = Field(..., min_length=1, max_length=2000)
+
+
+class PlaygroundChatResponse(BaseModel):
+    user_message: MessageResponse
+    ai_message: MessageResponse
+    handoff_detected: bool = False

@@ -36,10 +36,14 @@ from app.models.schemas import (
     VoucherIssue,
     VoucherResponse,
     VoucherStatsResponse,
+    PlaygroundChatRequest,
+    PlaygroundChatResponse,
 )
 from app.services.encryption import encrypt_token
 from app.services.redis_client import redis_client
-from app.services.handoff import resolve_handoff
+from app.services.handoff import resolve_handoff, needs_human_handoff
+from app.services.gemini import gemini_service
+from app.workers.message_worker import get_shop_context, get_recent_messages, save_message
 from app.services.voucher import generate_voucher_code, is_voucher_expired
 from app.api.auth import (
     get_current_shop,
@@ -68,6 +72,25 @@ async def register_shop(data: ShopCreate, db: AsyncSession = Depends(get_db)):
     db.add(shop)
     await db.flush()
 
+    return create_access_token(shop.id)
+
+
+@router.post("/auth/login", response_model=TokenResponse)
+async def login_by_name(
+    data: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """Login by shop name and return a JWT."""
+    name = data.get("name", "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Shop name is required")
+    stmt = select(Shop).where(func.lower(Shop.name) == name.lower())
+    result = await db.execute(stmt)
+    shop = result.scalar_one_or_none()
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+    if not shop.is_active:
+        raise HTTPException(status_code=403, detail="Shop is deactivated")
     return create_access_token(shop.id)
 
 
@@ -515,3 +538,112 @@ async def get_voucher_stats(
         total_active=active.scalar() or 0,
         budget_spent_sar=float(budget_result.scalar() or 0),
     )
+
+
+# ─── AI Playground ───────────────────────────────────────────────────────────
+
+
+@router.post("/shop/playground/conversations", response_model=ConversationResponse, status_code=201)
+async def create_playground_conversation(
+    shop_id: uuid.UUID = Depends(get_current_shop_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a new playground conversation."""
+    customer_id = f"playground-{uuid.uuid4()}"
+    convo = Conversation(
+        shop_id=shop_id,
+        platform="playground",
+        customer_id=customer_id,
+        status="ai",
+    )
+    db.add(convo)
+    await db.flush()
+    return convo
+
+
+@router.get("/shop/playground/conversations", response_model=list[ConversationResponse])
+async def list_playground_conversations(
+    limit: int = Query(50, le=200),
+    offset: int = 0,
+    shop_id: uuid.UUID = Depends(get_current_shop_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """List playground conversations for this shop."""
+    stmt = (
+        select(Conversation)
+        .where(Conversation.shop_id == shop_id, Conversation.platform == "playground")
+        .order_by(Conversation.created_at.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+    result = await db.execute(stmt)
+    return result.scalars().all()
+
+
+@router.post("/shop/playground/chat", response_model=PlaygroundChatResponse)
+async def playground_chat(
+    data: PlaygroundChatRequest,
+    shop: Shop = Depends(get_current_shop),
+    db: AsyncSession = Depends(get_db),
+):
+    """Send a message in the playground and get an AI reply."""
+    # Verify conversation belongs to this shop and is playground
+    stmt = select(Conversation).where(
+        Conversation.id == data.conversation_id,
+        Conversation.shop_id == shop.id,
+        Conversation.platform == "playground",
+    )
+    result = await db.execute(stmt)
+    convo = result.scalar_one_or_none()
+    if not convo:
+        raise HTTPException(status_code=404, detail="Playground conversation not found")
+
+    # Save user message
+    user_msg = await save_message(db, convo.id, "inbound", data.message, "customer")
+
+    # Check handoff keywords
+    handoff_detected = needs_human_handoff(data.message)
+
+    if handoff_detected:
+        reply_text = "أبشر، بحولك على الفريق الحين 🙏"
+    else:
+        context = await get_shop_context(db, shop)
+        history = await get_recent_messages(db, convo.id)
+        reply_text = await gemini_service.generate_reply(context, history, data.message)
+
+        # Gemini may output [HANDOFF_NEEDED] when it decides the customer needs a human
+        if "[HANDOFF_NEEDED]" in reply_text:
+            reply_text = "أبشر، بحولك على الفريق الحين 🙏"
+            handoff_detected = True
+
+    # Save AI reply
+    ai_msg = await save_message(db, convo.id, "outbound", reply_text, "ai")
+
+    return PlaygroundChatResponse(
+        user_message=MessageResponse.model_validate(user_msg, from_attributes=True),
+        ai_message=MessageResponse.model_validate(ai_msg, from_attributes=True),
+        handoff_detected=handoff_detected,
+    )
+
+
+@router.delete("/shop/playground/conversations/{conversation_id}", status_code=204)
+async def delete_playground_conversation(
+    conversation_id: uuid.UUID,
+    shop_id: uuid.UUID = Depends(get_current_shop_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete a playground conversation and its messages."""
+    stmt = select(Conversation).where(
+        Conversation.id == conversation_id,
+        Conversation.shop_id == shop_id,
+        Conversation.platform == "playground",
+    )
+    result = await db.execute(stmt)
+    convo = result.scalar_one_or_none()
+    if not convo:
+        raise HTTPException(status_code=404, detail="Playground conversation not found")
+
+    from sqlalchemy import delete as sql_delete
+    await db.execute(sql_delete(Message).where(Message.conversation_id == conversation_id))
+    await db.delete(convo)
+    await db.flush()

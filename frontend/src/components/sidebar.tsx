@@ -14,12 +14,14 @@ import {
   Coffee,
   Menu,
   X,
+  FlaskConical,
 } from "lucide-react";
 import { useState } from "react";
 
 const navItems = [
   { href: "/", label: "لوحة التحكم", icon: LayoutDashboard },
   { href: "/conversations", label: "المحادثات", icon: MessageSquare },
+  { href: "/playground", label: "ملعب الذكاء", icon: FlaskConical },
   { href: "/handoffs", label: "التحويلات", icon: Bell },
   { href: "/vouchers", label: "القسائم", icon: Ticket },
   { href: "/settings", label: "الإعدادات", icon: Settings },
