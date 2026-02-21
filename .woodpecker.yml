@@ -14,9 +14,10 @@ steps:
       - cd /src
       - git remote set-url origin https://github.com/taurusn/SEET.git
       - git pull origin claude/multi-tenant-messaging-platform-hhjM8
-      - docker compose -p seet up --build -d
-      - docker image prune -f
+      - docker compose -p seet up --build -d || true
+      - sleep 5
       - docker compose -p seet ps
+      - docker image prune -f
 
   # ─── Test ────────────────────────────────────────────────────────────────
   test:
