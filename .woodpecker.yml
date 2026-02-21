@@ -8,10 +8,10 @@ steps:
     image: docker
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - /home/hatim/SEET:/src
+      - /home/hatim/SEET:/home/hatim/SEET
     commands:
-      - git config --global --add safe.directory /src
-      - cd /src
+      - git config --global --add safe.directory /home/hatim/SEET
+      - cd /home/hatim/SEET
       - git fetch https://github.com/taurusn/SEET.git claude/multi-tenant-messaging-platform-hhjM8
       - git reset --hard FETCH_HEAD
       - docker compose -p seet up --build -d || true
