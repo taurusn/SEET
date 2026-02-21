@@ -215,6 +215,10 @@ async def process_message(msg: dict) -> None:
                 # Get or create conversation
                 convo = await get_or_create_conversation(db, shop.id, platform, customer_id)
 
+                # Load history BEFORE saving inbound message to avoid
+                # duplicating the current message in Gemini's context.
+                history = await get_recent_messages(db, convo.id)
+
                 # Save inbound message
                 await save_message(
                     db, convo.id, "inbound", text, "customer", meta_message_id
@@ -231,9 +235,8 @@ async def process_message(msg: dict) -> None:
                     await trigger_handoff(db, str(convo.id), reason=f"Customer said: {text}")
                     reply = HANDOFF_REPLY
                 else:
-                    # Load context and history, then generate reply
+                    # Generate reply with pre-loaded history
                     context = await get_shop_context(db, shop)
-                    history = await get_recent_messages(db, convo.id)
                     reply = await gemini_service.generate_reply(context, history, text)
 
                 # Save outbound message

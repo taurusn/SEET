@@ -598,6 +598,10 @@ async def playground_chat(
     if not convo:
         raise HTTPException(status_code=404, detail="Playground conversation not found")
 
+    # Load history BEFORE saving inbound message to avoid
+    # duplicating the current message in Gemini's context.
+    history = await get_recent_messages(db, convo.id)
+
     # Save user message
     user_msg = await save_message(db, convo.id, "inbound", data.message, "customer")
 
@@ -608,7 +612,6 @@ async def playground_chat(
         reply_text = "خلني أتواصل مع المسؤول ويرد عليك"
     else:
         context = await get_shop_context(db, shop)
-        history = await get_recent_messages(db, convo.id)
         reply_text = await gemini_service.generate_reply(context, history, data.message)
 
         # Gemini may output [HANDOFF_NEEDED] when it decides the customer needs a human
