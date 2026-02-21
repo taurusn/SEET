@@ -5,16 +5,18 @@ when:
 steps:
   # ─── Deploy ──────────────────────────────────────────────────────────────
   deploy:
-    image: docker:cli
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - /home/hatim/SEET:/home/hatim/SEET
+    image: docker
     commands:
       - cd /home/hatim/SEET
-      - git pull origin main
+      - git pull origin claude/multi-tenant-messaging-platform-hhjM8
       - docker compose up --build -d
       - docker image prune -f
       - docker compose ps
+    backend_options:
+      docker:
+        volumes:
+          - /var/run/docker.sock:/var/run/docker.sock
+          - /home/hatim/SEET:/home/hatim/SEET
 
   # ─── Test ────────────────────────────────────────────────────────────────
   test:
