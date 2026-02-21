@@ -1,0 +1,32 @@
+when:
+  branch: main
+  event: push
+
+steps:
+  # ─── Deploy ──────────────────────────────────────────────────────────────
+  deploy:
+    image: docker:cli
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /home/hatim/SEET:/home/hatim/SEET
+    commands:
+      - cd /home/hatim/SEET
+      - git pull origin main
+      - docker compose up --build -d
+      - docker image prune -f
+      - docker compose ps
+
+  # ─── Test ────────────────────────────────────────────────────────────────
+  test:
+    image: python:3.12-slim
+    commands:
+      - pip install -r requirements.txt -q
+      - python -m pytest tests/ -x -q
+    depends_on: []
+
+  lint:
+    image: python:3.12-slim
+    commands:
+      - pip install ruff -q
+      - ruff check app/
+    depends_on: []

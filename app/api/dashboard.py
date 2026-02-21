@@ -605,7 +605,7 @@ async def playground_chat(
     handoff_detected = needs_human_handoff(data.message)
 
     if handoff_detected:
-        reply_text = "أبشر، بحولك على الفريق الحين 🙏"
+        reply_text = "خلني أتواصل مع المسؤول ويرد عليك"
     else:
         context = await get_shop_context(db, shop)
         history = await get_recent_messages(db, convo.id)
@@ -613,7 +613,7 @@ async def playground_chat(
 
         # Gemini may output [HANDOFF_NEEDED] when it decides the customer needs a human
         if "[HANDOFF_NEEDED]" in reply_text:
-            reply_text = "أبشر، بحولك على الفريق الحين 🙏"
+            reply_text = "خلني أتواصل مع المسؤول ويرد عليك"
             handoff_detected = True
 
     # Save AI reply

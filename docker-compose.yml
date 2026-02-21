@@ -127,7 +127,46 @@ services:
       timeout: 10s
       retries: 5
 
+  # ─── CI/CD (Woodpecker) ──────────────────────────────────────────────────
+  woodpecker-tunnel:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate --url http://woodpecker-server:8000
+    depends_on:
+      - woodpecker-server
+    restart: unless-stopped
+
+  woodpecker-server:
+    image: woodpeckerci/woodpecker-server:latest
+    ports:
+      - "8080:8000"
+    volumes:
+      - woodpecker_data:/var/lib/woodpecker
+    environment:
+      WOODPECKER_HOST: ${WOODPECKER_HOST:-http://localhost:8080}
+      WOODPECKER_OPEN: "true"
+      WOODPECKER_ADMIN: ${WOODPECKER_ADMIN:-hatim}
+      WOODPECKER_GITHUB: "true"
+      WOODPECKER_GITHUB_CLIENT: ${WOODPECKER_GITHUB_CLIENT}
+      WOODPECKER_GITHUB_SECRET: ${WOODPECKER_GITHUB_SECRET}
+      WOODPECKER_AGENT_SECRET: ${WOODPECKER_AGENT_SECRET}
+    restart: unless-stopped
+
+  woodpecker-agent:
+    image: woodpeckerci/woodpecker-agent:latest
+    depends_on:
+      - woodpecker-server
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /home/hatim/SEET:/home/hatim/SEET
+    environment:
+      WOODPECKER_SERVER: woodpecker-server:9000
+      WOODPECKER_AGENT_SECRET: ${WOODPECKER_AGENT_SECRET}
+      WOODPECKER_MAX_WORKFLOWS: 1
+      DOCKER_API_VERSION: "1.44"
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   redis_data:
   rabbitmq_data:
+  woodpecker_data:
