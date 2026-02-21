@@ -41,7 +41,7 @@ from app.models.schemas import (
 )
 from app.services.encryption import encrypt_token
 from app.services.redis_client import redis_client
-from app.services.handoff import resolve_handoff, needs_human_handoff
+from app.services.handoff import resolve_handoff, trigger_handoff, needs_human_handoff
 from app.services.gemini import gemini_service
 from app.workers.message_worker import get_shop_context, get_recent_messages, save_message
 from app.services.voucher import generate_voucher_code, is_voucher_expired
@@ -641,6 +641,12 @@ async def playground_chat(
         if "[HANDOFF_NEEDED]" in reply_text:
             reply_text = "خلني أتواصل مع المسؤول ويرد عليك"
             handoff_detected = True
+
+    # Create handoff request so it appears in the dashboard
+    if handoff_detected:
+        await trigger_handoff(
+            db, str(convo.id), reason=f"Customer said: {data.message}"
+        )
 
     # Save AI reply
     ai_msg = await save_message(db, convo.id, "outbound", reply_text, "ai")
