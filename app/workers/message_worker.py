@@ -239,6 +239,11 @@ async def process_message(msg: dict) -> None:
                     context = await get_shop_context(db, shop)
                     reply = await gemini_service.generate_reply(context, history, text)
 
+                    # Gemini may output [HANDOFF_NEEDED] when it decides escalation is needed
+                    if "[HANDOFF_NEEDED]" in reply:
+                        await trigger_handoff(db, str(convo.id), reason=f"Customer said: {text}")
+                        reply = HANDOFF_REPLY
+
                 # Save outbound message
                 outbound_msg = await save_message(db, convo.id, "outbound", reply, "ai")
                 await db.commit()
