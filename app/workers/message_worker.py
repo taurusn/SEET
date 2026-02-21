@@ -14,7 +14,6 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import get_settings
 from app.db.database import async_session_factory
 from app.models.schemas import Shop, ShopContext, Conversation, Message
 from app.queue.rabbitmq import rabbitmq, INBOUND_QUEUE, OUTBOUND_QUEUE

@@ -7,7 +7,7 @@ steps:
   deploy:
     image: docker
     commands:
-      - cd /home/hatim/SEET
+      - cd /src
       - git pull origin claude/multi-tenant-messaging-platform-hhjM8
       - docker compose up --build -d
       - docker image prune -f
@@ -16,13 +16,13 @@ steps:
       docker:
         volumes:
           - /var/run/docker.sock:/var/run/docker.sock
-          - /home/hatim/SEET:/home/hatim/SEET
+          - /home/hatim/SEET:/src
 
   # ─── Test ────────────────────────────────────────────────────────────────
   test:
     image: python:3.12-slim
     commands:
-      - pip install -r requirements.txt -q
+      - pip install -r requirements.txt pytest -q
       - python -m pytest tests/ -x -q
     depends_on: []
 
