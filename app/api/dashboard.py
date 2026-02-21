@@ -45,6 +45,7 @@ from app.services.handoff import resolve_handoff, needs_human_handoff
 from app.services.gemini import gemini_service
 from app.workers.message_worker import get_shop_context, get_recent_messages, save_message
 from app.services.voucher import generate_voucher_code, is_voucher_expired
+from app.queue.rabbitmq import rabbitmq, OUTBOUND_QUEUE
 from app.api.auth import (
     get_current_shop,
     get_current_shop_id,
@@ -441,6 +442,28 @@ async def issue_voucher(
     )
     db.add(voucher)
     await db.flush()
+
+    # Send voucher message to the customer in the same conversation
+    if data.platform in ("instagram", "whatsapp"):
+        voucher_msg = (
+            f"هلا! رتبنا لك تعويض: {tier.label}.\n"
+            f"كود القسيمة: {code}\n"
+            f"صلاحيتها {tier.validity_days} يوم."
+        )
+        outbound = await save_message(
+            db, data.conversation_id, "outbound", voucher_msg, "human"
+        )
+        await db.flush()
+
+        await rabbitmq.publish(OUTBOUND_QUEUE, {
+            "conversation_id": str(data.conversation_id),
+            "platform": data.platform,
+            "customer_id": data.customer_id,
+            "shop_id": str(shop.id),
+            "reply": voucher_msg,
+            "message_id": str(outbound.id),
+        })
+
     return voucher
 
 
