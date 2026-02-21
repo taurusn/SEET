@@ -7,7 +7,7 @@ All dashboard endpoints are scoped to that shop — no cross-tenant access.
 
 import uuid
 from datetime import datetime, timezone, timedelta
-from typing import Optional
+
 
 import jwt
 from fastapi import Depends, HTTPException, status
