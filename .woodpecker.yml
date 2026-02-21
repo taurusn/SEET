@@ -10,7 +10,7 @@ steps:
       - /var/run/docker.sock:/var/run/docker.sock
       - /home/hatim/SEET:/src
     commands:
-      - ls /src
+      - git config --global --add safe.directory /src
       - cd /src
       - git pull origin claude/multi-tenant-messaging-platform-hhjM8
       - docker compose up --build -d
