@@ -6,17 +6,16 @@ steps:
   # ─── Deploy ──────────────────────────────────────────────────────────────
   deploy:
     image: docker
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /home/hatim/SEET:/src
     commands:
+      - ls /src
       - cd /src
       - git pull origin claude/multi-tenant-messaging-platform-hhjM8
       - docker compose up --build -d
       - docker image prune -f
       - docker compose ps
-    backend_options:
-      docker:
-        volumes:
-          - /var/run/docker.sock:/var/run/docker.sock
-          - /home/hatim/SEET:/src
 
   # ─── Test ────────────────────────────────────────────────────────────────
   test:
