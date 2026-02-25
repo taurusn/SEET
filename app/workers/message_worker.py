@@ -19,7 +19,7 @@ from app.models.schemas import Shop, ShopContext, Conversation, Message
 from app.queue.rabbitmq import rabbitmq, INBOUND_QUEUE, OUTBOUND_QUEUE
 from app.services.redis_client import redis_client
 from app.services.gemini import gemini_service
-from app.services.handoff import needs_human_handoff, trigger_handoff
+from app.services.handoff import trigger_handoff
 from app.services.instagram import extract_ig_messages
 from app.services.whatsapp import extract_wa_messages
 
@@ -251,21 +251,16 @@ async def process_message(msg: dict) -> None:
                         await db.commit()
                     continue
 
-                # Check for handoff triggers
-                if needs_human_handoff(text):
+                # Let Gemini handle the conversation — it decides when to escalate
+                # via [HANDOFF_NEEDED] based on the system prompt rules.
+                context = await get_shop_context(db, shop)
+                reply = await gemini_service.generate_reply(
+                    context, history, text, conversation_id=str(convo.id),
+                )
+
+                if "[HANDOFF_NEEDED]" in reply:
                     await trigger_handoff(db, str(convo.id), reason=f"Customer said: {text}")
                     reply = HANDOFF_REPLY
-                else:
-                    # Generate reply with pre-loaded history
-                    context = await get_shop_context(db, shop)
-                    reply = await gemini_service.generate_reply(
-                        context, history, text, conversation_id=str(convo.id),
-                    )
-
-                    # Gemini may output [HANDOFF_NEEDED] when it decides escalation is needed
-                    if "[HANDOFF_NEEDED]" in reply:
-                        await trigger_handoff(db, str(convo.id), reason=f"Customer said: {text}")
-                        reply = HANDOFF_REPLY
 
                 # Save outbound message
                 outbound_msg = await save_message(db, convo.id, "outbound", reply, "ai")
