@@ -42,7 +42,7 @@ from app.models.schemas import (
 )
 from app.services.encryption import encrypt_token
 from app.services.redis_client import redis_client
-from app.services.handoff import resolve_handoff, trigger_handoff, needs_human_handoff
+from app.services.handoff import resolve_handoff, trigger_handoff
 from app.services.gemini import gemini_service
 from app.workers.message_worker import get_shop_context, get_recent_messages, save_message, HANDOFF_REPLY
 from app.services.voucher import generate_voucher_code, is_voucher_expired
@@ -704,21 +704,17 @@ async def playground_chat(
     # Save user message
     user_msg = await save_message(db, convo.id, "inbound", data.message, "customer")
 
-    # Check handoff keywords
-    handoff_detected = needs_human_handoff(data.message)
+    # Let Gemini handle the conversation — it decides when to escalate
+    # via [HANDOFF_NEEDED] based on the system prompt rules.
+    handoff_detected = False
+    context = await get_shop_context(db, shop)
+    reply_text = await gemini_service.generate_reply(
+        context, history, data.message, conversation_id=str(convo.id),
+    )
 
-    if handoff_detected:
+    if "[HANDOFF_NEEDED]" in reply_text:
         reply_text = HANDOFF_REPLY
-    else:
-        context = await get_shop_context(db, shop)
-        reply_text = await gemini_service.generate_reply(
-            context, history, data.message, conversation_id=str(convo.id),
-        )
-
-        # Gemini may output [HANDOFF_NEEDED] when it decides the customer needs a human
-        if "[HANDOFF_NEEDED]" in reply_text:
-            reply_text = HANDOFF_REPLY
-            handoff_detected = True
+        handoff_detected = True
 
     # Create handoff request so it appears in the dashboard
     if handoff_detected:
