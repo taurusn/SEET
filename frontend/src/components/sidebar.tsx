@@ -11,12 +11,9 @@ import {
   Ticket,
   Settings,
   LogOut,
-  Coffee,
-  Menu,
-  X,
   FlaskConical,
 } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState, useCallback } from "react";
 
 const navItems = [
   { href: "/", label: "لوحة التحكم", icon: LayoutDashboard },
@@ -27,86 +24,117 @@ const navItems = [
   { href: "/settings", label: "الإعدادات", icon: Settings },
 ];
 
-export function Sidebar() {
+export function Dock() {
   const pathname = usePathname();
-  const { shop, logout } = useAuth();
-  const [open, setOpen] = useState(false);
+  const { logout } = useAuth();
+  const [mouseX, setMouseX] = useState<number | null>(null);
+  const dockRef = useRef<HTMLDivElement>(null);
+  const itemRefs = useRef<(HTMLElement | null)[]>([]);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    setMouseX(e.clientX);
+  }, []);
+
+  const handleMouseLeave = useCallback(() => {
+    setMouseX(null);
+  }, []);
+
+  const getScale = useCallback(
+    (index: number) => {
+      if (mouseX === null) return 1;
+      const el = itemRefs.current[index];
+      if (!el) return 1;
+
+      const rect = el.getBoundingClientRect();
+      const center = rect.left + rect.width / 2;
+      const distance = Math.abs(mouseX - center);
+      const maxDist = 150;
+
+      if (distance >= maxDist) return 1;
+      return 1 + 0.4 * Math.cos((distance / maxDist) * (Math.PI / 2));
+    },
+    [mouseX]
+  );
 
   return (
-    <>
-      {/* Mobile toggle */}
-      <button
-        onClick={() => setOpen(!open)}
-        className="fixed top-4 right-4 z-50 md:hidden p-2 rounded-xl bg-sidebar text-sidebar-foreground"
+    <div className="fixed bottom-3 left-1/2 -translate-x-1/2 z-50">
+      <div
+        ref={dockRef}
+        onMouseMove={handleMouseMove}
+        onMouseLeave={handleMouseLeave}
+        className="dock-glass flex items-end gap-1 px-2.5 pb-2 pt-2 rounded-[22px]"
       >
-        {open ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-      </button>
+        {navItems.map((item, i) => {
+          const isActive =
+            pathname === item.href ||
+            (item.href !== "/" && pathname.startsWith(item.href));
+          const scale = getScale(i);
+          const Icon = item.icon;
 
-      {/* Overlay */}
-      {open && (
-        <div
-          className="fixed inset-0 bg-black/50 z-30 md:hidden"
-          onClick={() => setOpen(false)}
-        />
-      )}
-
-      {/* Sidebar */}
-      <aside
-        className={cn(
-          "fixed right-0 top-0 h-full w-64 bg-sidebar text-sidebar-foreground z-40 flex flex-col transition-transform duration-200",
-          "md:translate-x-0",
-          open ? "translate-x-0" : "translate-x-full md:translate-x-0"
-        )}
-      >
-        {/* Logo */}
-        <div className="p-6 flex items-center gap-3 border-b border-white/10">
-          <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center">
-            <Coffee className="w-5 h-5 text-white" />
-          </div>
-          <div>
-            <h1 className="font-bold text-lg">Cafe Reply</h1>
-            <p className="text-xs text-sidebar-foreground/60 truncate max-w-[140px]">
-              {shop?.name || "..."}
-            </p>
-          </div>
-        </div>
-
-        {/* Navigation */}
-        <nav className="flex-1 p-4 space-y-1">
-          {navItems.map((item) => {
-            const isActive =
-              pathname === item.href ||
-              (item.href !== "/" && pathname.startsWith(item.href));
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                onClick={() => setOpen(false)}
-                className={cn(
-                  "flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors",
-                  isActive
-                    ? "bg-sidebar-active text-white"
-                    : "text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-white/5"
-                )}
-              >
-                <item.icon className="w-5 h-5" />
-                {item.label}
+          return (
+            <div
+              key={item.href}
+              ref={(el) => {
+                itemRefs.current[i] = el;
+              }}
+              className="dock-item group relative flex flex-col items-center"
+            >
+              <span className="dock-tooltip">{item.label}</span>
+              <Link href={item.href} className="block">
+                <div
+                  className={cn(
+                    "w-11 h-11 md:w-12 md:h-12 rounded-[13px] flex items-center justify-center",
+                    isActive
+                      ? "bg-primary text-white dock-icon-active"
+                      : "bg-white/[0.08] text-white/60 hover:bg-white/[0.15] hover:text-white/90"
+                  )}
+                  style={{
+                    transform: `scale(${scale})`,
+                    transformOrigin: "bottom center",
+                    transition:
+                      mouseX !== null
+                        ? "transform 0.15s cubic-bezier(0.33,1,0.68,1), background-color 0.2s, color 0.2s"
+                        : "transform 0.3s cubic-bezier(0.33,1,0.68,1), background-color 0.2s, color 0.2s",
+                  }}
+                >
+                  <Icon className="w-[22px] h-[22px]" />
+                </div>
               </Link>
-            );
-          })}
-        </nav>
+              {isActive && (
+                <div className="w-1 h-1 rounded-full bg-white/90 mt-0.5" />
+              )}
+            </div>
+          );
+        })}
+
+        {/* Separator */}
+        <div className="w-px h-8 bg-white/[0.12] mx-1 mb-1 self-center" />
 
         {/* Logout */}
-        <div className="p-4 border-t border-white/10">
-          <button
-            onClick={logout}
-            className="flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-white/5 w-full transition-colors"
-          >
-            <LogOut className="w-5 h-5" />
-            تسجيل خروج
+        <div
+          ref={(el) => {
+            itemRefs.current[navItems.length + 1] = el;
+          }}
+          className="dock-item group relative flex flex-col items-center"
+        >
+          <span className="dock-tooltip">تسجيل خروج</span>
+          <button onClick={logout} className="block">
+            <div
+              className="w-11 h-11 md:w-12 md:h-12 rounded-[13px] flex items-center justify-center bg-white/[0.08] text-white/60 hover:bg-red-500/20 hover:text-red-400"
+              style={{
+                transform: `scale(${getScale(navItems.length + 1)})`,
+                transformOrigin: "bottom center",
+                transition:
+                  mouseX !== null
+                    ? "transform 0.15s cubic-bezier(0.33,1,0.68,1), background-color 0.2s, color 0.2s"
+                    : "transform 0.3s cubic-bezier(0.33,1,0.68,1), background-color 0.2s, color 0.2s",
+              }}
+            >
+              <LogOut className="w-[22px] h-[22px]" />
+            </div>
           </button>
         </div>
-      </aside>
-    </>
+      </div>
+    </div>
   );
 }
