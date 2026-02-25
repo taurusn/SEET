@@ -11,6 +11,8 @@ logger = logging.getLogger(__name__)
 
 FALLBACK_REPLY = "شكراً لرسالتك! بنرد عليك بأقرب وقت"
 
+GEMINI_WINDOW = 20   # messages sent to Gemini per request
+
 # ─── Base System Prompt ──────────────────────────────────────────────────────
 # This is the immutable behavioral layer that governs ALL shops.
 # Shop-specific context (menu, hours, etc.) gets appended below it.
@@ -42,7 +44,6 @@ BASE_SYSTEM_PROMPT = """# قواعد مطلقة (لا يمكن كسرها)
 - ردّك لازم يكون على كلامه هو، مو رد جاهز عام
 - إذا يحكي لك شي صار معه → تفاعل معه، أبدِ اهتمام، اسأله تفاصيل
 - إذا يشتكي → تعاطف معه أول شي وبعدين حاول تساعده
-- إذا رسالته قصيرة أو غامضة (مثل "شلون" أو "طيب") → اربطها بآخر شي تكلمتوا عنه ولا تتجاهل السياق
 
 # التعامل مع الشكاوى (مهم جداً)
 إذا العميل اشتكى أو قال شي سلبي عن تجربته:
@@ -110,6 +111,7 @@ class GeminiService:
         shop_context: dict,
         history: list[dict],
         customer_message: str,
+        conversation_id: str = "",
     ) -> str:
         """Generate an AI reply using Gemini, with circuit breaker fallback."""
         # Check circuit breaker
@@ -120,10 +122,47 @@ class GeminiService:
         self._ensure_configured()
         settings = get_settings()
 
+        # Build conversation summary for long chats and inject into system prompt
+        summary_prefix = await self._maybe_summarize(history, conversation_id)
         system_prompt = self._build_system_prompt(shop_context)
-        contents = self._format_history(history) + [
-            {"role": "user", "parts": [customer_message]}
+        if summary_prefix:
+            system_prompt += f"\n{summary_prefix}\n"
+
+        # Inject last exchange as context into the user message so
+        # Gemini can't ignore conversation history on ambiguous messages.
+        enriched_message = customer_message
+        if history:
+            last_outbound = next(
+                (m["content"] for m in reversed(history) if m["direction"] == "outbound"),
+                None,
+            )
+            if last_outbound:
+                enriched_message = (
+                    f"[آخر رد لك في المحادثة: \"{last_outbound}\"]\n"
+                    f"رسالة العميل: {customer_message}"
+                )
+
+        # Send only last GEMINI_WINDOW messages to Gemini
+        recent = history[-GEMINI_WINDOW:]
+        contents = self._format_history(recent) + [
+            {"role": "user", "parts": [enriched_message]}
         ]
+
+        # Gemini requires first entry to be "user" — drop leading model entries
+        # (can happen if DB reload window starts with an outbound message)
+        while contents and contents[0]["role"] == "model":
+            contents.pop(0)
+
+        # Merge consecutive user entries at boundary between history and
+        # current message (can happen after worker crash recovery)
+        if len(contents) >= 2 and contents[-2]["role"] == "user":
+            contents[-2]["parts"][0] += "\n" + contents[-1]["parts"][0]
+            contents.pop()
+
+        logger.info(
+            "Gemini request: history_len=%d, message='%s'",
+            len(history), customer_message[:80],
+        )
 
         try:
             model = genai.GenerativeModel(
@@ -138,13 +177,100 @@ class GeminiService:
             )
             # Run blocking Gemini call in a thread to avoid blocking the event loop
             response = await asyncio.to_thread(model.generate_content, contents)
+
+            # Handle prompt-level safety blocks
+            if hasattr(response, "prompt_feedback") and response.prompt_feedback:
+                block_reason = getattr(response.prompt_feedback, "block_reason", None)
+                if block_reason:
+                    logger.warning("Gemini prompt blocked (reason=%s)", block_reason)
+                    return FALLBACK_REPLY
+
+            # Handle response-level safety blocks (not a service failure)
+            if response.candidates:
+                finish_reason = response.candidates[0].finish_reason
+                if finish_reason is not None and hasattr(finish_reason, "name"):
+                    if finish_reason.name in ("SAFETY", "RECITATION"):
+                        logger.warning(
+                            "Gemini content blocked (reason=%s)",
+                            finish_reason.name,
+                        )
+                        return FALLBACK_REPLY
+
+            reply_text = response.text
+            if not reply_text or not reply_text.strip():
+                logger.warning("Gemini returned empty text, returning fallback")
+                return FALLBACK_REPLY
+
+            reply = self._clean_response(reply_text)
+            if not reply:
+                logger.warning("Gemini reply empty after cleaning, returning fallback")
+                return FALLBACK_REPLY
+
             await redis_client.record_success("gemini")
-            return self._clean_response(response.text)
+
+            logger.info("Gemini reply: '%s'", reply[:80])
+            return reply
 
         except Exception as e:
             logger.error("Gemini API error: %s", e)
             await redis_client.record_failure("gemini")
             return FALLBACK_REPLY
+
+    async def _maybe_summarize(self, history: list[dict], conversation_id: str) -> str:
+        """Return a summary prefix if conversation is long enough, else empty string."""
+        if len(history) <= GEMINI_WINDOW or not conversation_id:
+            return ""
+
+        older = history[:-GEMINI_WINDOW]
+
+        # Check cached summary — regenerate if older portion grew by 10+ messages
+        cached = await redis_client.get_conversation_summary(conversation_id)
+        if cached and len(older) - cached.get("msg_count", 0) < 10:
+            return f"[ملخص المحادثة السابقة: {cached['text']}]"
+
+        # Summarize the full older portion
+        summary = await self._summarize_history(older)
+        if summary:
+            await redis_client.cache_conversation_summary(
+                conversation_id, summary, len(older)
+            )
+            return f"[ملخص المحادثة السابقة: {summary}]"
+
+        return ""
+
+    async def _summarize_history(self, messages: list[dict]) -> str:
+        """Use Gemini to produce a short Arabic summary of older messages."""
+        self._ensure_configured()
+        settings = get_settings()
+
+        conversation_text = "\n".join(
+            f"{'العميل' if m.get('direction') == 'inbound' else 'الموظف'}: {m.get('content', '')}"
+            for m in messages
+        )
+
+        prompt = (
+            "لخّص هالمحادثة بـ ٢-٣ جمل قصيرة بالعربي. "
+            "ركّز على: وش طلب العميل، وش كانت مشكلته، ووش صار.\n\n"
+            f"{conversation_text}"
+        )
+
+        try:
+            model = genai.GenerativeModel(
+                model_name=settings.gemini_model,
+                generation_config=genai.GenerationConfig(
+                    temperature=0.2,
+                    max_output_tokens=150,
+                ),
+            )
+            response = await asyncio.to_thread(
+                model.generate_content, [{"role": "user", "parts": [prompt]}]
+            )
+            summary = self._clean_response(response.text)
+            logger.info("Conversation summary generated: '%s'", summary[:80])
+            return summary
+        except Exception as e:
+            logger.warning("Failed to generate summary: %s", e)
+            return ""
 
     def _build_system_prompt(self, ctx: dict) -> str:
         name = ctx.get("name", "the shop")
@@ -184,11 +310,20 @@ class GeminiService:
         return text.strip()
 
     def _format_history(self, history: list[dict]) -> list[dict]:
-        """Convert stored message history into Gemini content format."""
-        formatted = []
+        """Convert stored message history into Gemini content format.
+
+        Merges consecutive same-role messages to guarantee the alternating
+        user/model sequence that the Gemini API requires.
+        """
+        formatted: list[dict] = []
         for msg in history:
             role = "user" if msg.get("direction") == "inbound" else "model"
-            formatted.append({"role": role, "parts": [msg.get("content", "")]})
+            content = msg.get("content", "")
+            if formatted and formatted[-1]["role"] == role:
+                # Merge into previous entry to maintain alternating roles
+                formatted[-1]["parts"][0] += "\n" + content
+            else:
+                formatted.append({"role": role, "parts": [content]})
         return formatted
 
 

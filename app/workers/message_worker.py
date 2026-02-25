@@ -29,7 +29,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-HANDOFF_REPLY = "أبشر، بحولك على الفريق الحين 🙏"
+HANDOFF_REPLY = "أبشر، خلني أتواصل مع المسؤول ويرد عليك"
 
 
 async def identify_shop(
@@ -89,7 +89,7 @@ async def get_or_create_conversation(
 
 
 async def get_recent_messages(
-    db: AsyncSession, conversation_id: uuid.UUID, limit: int = 10
+    db: AsyncSession, conversation_id: uuid.UUID, limit: int = 50
 ) -> list[dict]:
     """Load recent messages, preferring Redis cache, falling back to DB."""
     convo_id_str = str(conversation_id)
@@ -99,10 +99,14 @@ async def get_recent_messages(
     if cached:
         return cached[-limit:]
 
-    # Fall back to DB
+    # Fall back to DB — exclude human agent messages so Gemini only
+    # sees customer + AI messages (human replies would confuse the model).
     stmt = (
         select(Message)
-        .where(Message.conversation_id == conversation_id)
+        .where(
+            Message.conversation_id == conversation_id,
+            Message.sender_type.in_(["customer", "ai"]),
+        )
         .order_by(Message.created_at.desc())
         .limit(limit)
     )
@@ -224,10 +228,27 @@ async def process_message(msg: dict) -> None:
                     db, convo.id, "inbound", text, "customer", meta_message_id
                 )
 
-                # If human handoff is active, skip AI
+                # If human handoff is active, send ONE holding reply then stay silent
                 if convo.status == "human":
-                    logger.info("Conversation %s in human mode, skipping AI", convo.id)
-                    await db.commit()
+                    if await redis_client.claim_hold_reply(str(convo.id)):
+                        logger.info("Conversation %s in human mode, sending hold reply", convo.id)
+                        hold_reply = "رسالتك وصلت! المسؤول يراجع الموضوع ويرد عليك بأقرب وقت."
+                        outbound_msg = await save_message(
+                            db, convo.id, "outbound", hold_reply, "ai"
+                        )
+                        await db.commit()
+
+                        await rabbitmq.publish(OUTBOUND_QUEUE, {
+                            "conversation_id": str(convo.id),
+                            "platform": platform,
+                            "customer_id": customer_id,
+                            "shop_id": str(shop.id),
+                            "reply": hold_reply,
+                            "message_id": str(outbound_msg.id),
+                        })
+                    else:
+                        logger.info("Conversation %s in human mode, hold reply already sent", convo.id)
+                        await db.commit()
                     continue
 
                 # Check for handoff triggers
@@ -237,7 +258,9 @@ async def process_message(msg: dict) -> None:
                 else:
                     # Generate reply with pre-loaded history
                     context = await get_shop_context(db, shop)
-                    reply = await gemini_service.generate_reply(context, history, text)
+                    reply = await gemini_service.generate_reply(
+                        context, history, text, conversation_id=str(convo.id),
+                    )
 
                     # Gemini may output [HANDOFF_NEEDED] when it decides escalation is needed
                     if "[HANDOFF_NEEDED]" in reply:

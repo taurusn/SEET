@@ -9,6 +9,9 @@ from app.config import get_settings
 logger = logging.getLogger(__name__)
 
 
+HISTORY_TTL = 86400  # 24 hours — long enough for customers who return next day
+
+
 class RedisClient:
     """Redis client for conversation caching, rate limiting, and deduplication."""
 
@@ -38,7 +41,7 @@ class RedisClient:
     ) -> None:
         """Cache recent conversation messages for fast Gemini context loading."""
         key = f"conv:{conversation_id}:history"
-        await self.client.set(key, json.dumps(messages, default=str), ex=3600)
+        await self.client.set(key, json.dumps(messages, default=str), ex=HISTORY_TTL)
 
     async def get_conversation_history(self, conversation_id: str) -> Optional[list[dict]]:
         key = f"conv:{conversation_id}:history"
@@ -48,14 +51,61 @@ class RedisClient:
     async def append_to_history(
         self, conversation_id: str, message: dict
     ) -> None:
-        """Append a message to cached history, trimming to last 20."""
+        """Append a message to cached history, trimming to last 50."""
         key = f"conv:{conversation_id}:history"
         history = await self.get_conversation_history(conversation_id)
         if history is None:
             history = []
         history.append(message)
-        history = history[-20:]  # keep last 20 messages
-        await self.client.set(key, json.dumps(history, default=str), ex=3600)
+        history = history[-50:]  # keep last 50 messages in cache
+        await self.client.set(key, json.dumps(history, default=str), ex=HISTORY_TTL)
+
+    async def invalidate_conversation_history(self, conversation_id: str) -> None:
+        """Delete cached history, forcing a fresh load from DB next time."""
+        key = f"conv:{conversation_id}:history"
+        await self.client.delete(key)
+
+    # ─── Conversation Summary Cache ────────────────────────────────────
+
+    async def get_conversation_summary(self, conversation_id: str) -> Optional[dict]:
+        """Return cached summary as {text, msg_count} or None."""
+        key = f"conv:{conversation_id}:summary"
+        data = await self.client.get(key)
+        if not data:
+            return None
+        try:
+            parsed = json.loads(data)
+            if isinstance(parsed, dict) and "text" in parsed:
+                return parsed
+            # Backwards compat: old plain-string format
+            return {"text": parsed if isinstance(parsed, str) else str(parsed), "msg_count": 0}
+        except (json.JSONDecodeError, TypeError):
+            return None
+
+    async def cache_conversation_summary(
+        self, conversation_id: str, summary: str, msg_count: int
+    ) -> None:
+        key = f"conv:{conversation_id}:summary"
+        value = json.dumps({"text": summary, "msg_count": msg_count})
+        await self.client.set(key, value, ex=HISTORY_TTL)
+
+    # ─── Hold Reply Rate Limiting ──────────────────────────────────────
+
+    async def claim_hold_reply(self, conversation_id: str) -> bool:
+        """Atomically claim the right to send a hold reply.
+
+        Returns True if the flag was newly set (caller should send the reply).
+        Returns False if it already existed (another worker already sent it).
+        Uses SET NX for atomic check-and-set — same pattern as dedup.
+        """
+        key = f"holdreply:{conversation_id}"
+        result = await self.client.set(key, "1", nx=True, ex=HISTORY_TTL)
+        return result is not None
+
+    async def clear_hold_reply_flag(self, conversation_id: str) -> None:
+        """Clear the hold reply flag (called on handoff resolution)."""
+        key = f"holdreply:{conversation_id}"
+        await self.client.delete(key)
 
     # ─── Message Deduplication ───────────────────────────────────────────
 

@@ -54,6 +54,7 @@ async def trigger_handoff(
 async def resolve_handoff(
     db: AsyncSession,
     conversation_id: str,
+    resolution_note: str | None = None,
 ) -> None:
     """Resolve a handoff and return conversation to AI mode."""
     from datetime import datetime, timezone
@@ -80,4 +81,24 @@ async def resolve_handoff(
     if handoff:
         handoff.resolved_at = datetime.now(timezone.utc)
 
+    # Save a context bridge note so Gemini knows what happened during handoff.
+    # sender_type="ai" ensures it passes the DB filter in get_recent_messages.
+    # The message is NOT published to the outbound queue — customer never sees it.
+    from app.models.schemas import Message
+    note_text = resolution_note or "[تم حل الموضوع مع المسؤول. المحادثة رجعت للوضع العادي.]"
+    bridge = Message(
+        conversation_id=conversation_id,
+        direction="outbound",
+        content=note_text,
+        sender_type="ai",
+        status="sent",
+    )
+    db.add(bridge)
+    await db.flush()
+
     logger.info("Handoff resolved for conversation %s", conversation_id)
+
+    # Clear Redis state so next message gets a fresh start
+    from app.services.redis_client import redis_client
+    await redis_client.clear_hold_reply_flag(conversation_id)
+    await redis_client.invalidate_conversation_history(conversation_id)
