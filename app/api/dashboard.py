@@ -38,12 +38,13 @@ from app.models.schemas import (
     VoucherStatsResponse,
     PlaygroundChatRequest,
     PlaygroundChatResponse,
+    OwnerReplyRequest,
 )
 from app.services.encryption import encrypt_token
 from app.services.redis_client import redis_client
 from app.services.handoff import resolve_handoff, trigger_handoff, needs_human_handoff
 from app.services.gemini import gemini_service
-from app.workers.message_worker import get_shop_context, get_recent_messages, save_message
+from app.workers.message_worker import get_shop_context, get_recent_messages, save_message, HANDOFF_REPLY
 from app.services.voucher import generate_voucher_code, is_voucher_expired
 from app.queue.rabbitmq import rabbitmq, OUTBOUND_QUEUE
 from app.api.auth import (
@@ -232,6 +233,58 @@ async def get_conversation_messages(
     )
     result = await db.execute(stmt)
     return result.scalars().all()
+
+
+@router.post(
+    "/shop/conversations/{conversation_id}/reply",
+    response_model=MessageResponse,
+)
+async def owner_reply(
+    conversation_id: uuid.UUID,
+    data: OwnerReplyRequest,
+    shop: Shop = Depends(get_current_shop),
+    db: AsyncSession = Depends(get_db),
+):
+    """Send a custom reply from the shop owner to the customer.
+
+    Only allowed when conversation is in 'human' mode (active handoff).
+    """
+    stmt = select(Conversation).where(
+        Conversation.id == conversation_id,
+        Conversation.shop_id == shop.id,
+    )
+    result = await db.execute(stmt)
+    convo = result.scalar_one_or_none()
+    if not convo:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    if convo.status != "human":
+        raise HTTPException(
+            status_code=400,
+            detail="Can only reply when conversation is in human mode",
+        )
+
+    if convo.platform == "playground":
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot send replies to playground conversations",
+        )
+
+    outbound_msg = await save_message(
+        db, convo.id, "outbound", data.message, "human"
+    )
+    await db.commit()
+
+    await rabbitmq.publish(OUTBOUND_QUEUE, {
+        "conversation_id": str(convo.id),
+        "platform": convo.platform,
+        "customer_id": convo.customer_id,
+        "shop_id": str(shop.id),
+        "reply": data.message,
+        "message_id": str(outbound_msg.id),
+    })
+
+    return outbound_msg
 
 
 # ─── Handoff Management ──────────────────────────────────────────────────────
@@ -443,7 +496,9 @@ async def issue_voucher(
     db.add(voucher)
     await db.flush()
 
-    # Send voucher message to the customer in the same conversation
+    # Build voucher message for real platforms
+    outbound = None
+    voucher_msg = None
     if data.platform in ("instagram", "whatsapp"):
         voucher_msg = (
             f"هلا! رتبنا لك تعويض: {tier.label}.\n"
@@ -453,8 +508,18 @@ async def issue_voucher(
         outbound = await save_message(
             db, data.conversation_id, "outbound", voucher_msg, "human"
         )
-        await db.flush()
 
+    # Auto-resolve handoff so conversation returns to AI mode
+    await resolve_handoff(
+        db, str(data.conversation_id),
+        resolution_note=f"[المسؤول رتب تعويض للعميل: {tier.label}. المحادثة رجعت للوضع العادي.]",
+    )
+
+    # Commit everything atomically (voucher + message + resolve) before publishing
+    await db.commit()
+
+    # Now safe to publish — DB state is consistent
+    if outbound and voucher_msg:
         await rabbitmq.publish(OUTBOUND_QUEUE, {
             "conversation_id": str(data.conversation_id),
             "platform": data.platform,
@@ -502,7 +567,7 @@ async def redeem_voucher(
         raise HTTPException(status_code=400, detail="Voucher already redeemed")
     if is_voucher_expired(voucher.expires_at):
         voucher.status = "expired"
-        await db.flush()
+        await db.commit()  # persist before raising — HTTPException triggers rollback in get_db
         raise HTTPException(status_code=400, detail="Voucher has expired")
 
     voucher.status = "redeemed"
@@ -621,6 +686,17 @@ async def playground_chat(
     if not convo:
         raise HTTPException(status_code=404, detail="Playground conversation not found")
 
+    # Respect handoff state in playground
+    if convo.status == "human":
+        user_msg = await save_message(db, convo.id, "inbound", data.message, "customer")
+        hold_text = "المحادثة محولة للمسؤول حالياً. استخدم زر حل التحويل للرجوع للذكاء الاصطناعي."
+        ai_msg = await save_message(db, convo.id, "outbound", hold_text, "ai")
+        return PlaygroundChatResponse(
+            user_message=MessageResponse.model_validate(user_msg, from_attributes=True),
+            ai_message=MessageResponse.model_validate(ai_msg, from_attributes=True),
+            handoff_detected=False,
+        )
+
     # Load history BEFORE saving inbound message to avoid
     # duplicating the current message in Gemini's context.
     history = await get_recent_messages(db, convo.id)
@@ -632,14 +708,16 @@ async def playground_chat(
     handoff_detected = needs_human_handoff(data.message)
 
     if handoff_detected:
-        reply_text = "خلني أتواصل مع المسؤول ويرد عليك"
+        reply_text = HANDOFF_REPLY
     else:
         context = await get_shop_context(db, shop)
-        reply_text = await gemini_service.generate_reply(context, history, data.message)
+        reply_text = await gemini_service.generate_reply(
+            context, history, data.message, conversation_id=str(convo.id),
+        )
 
         # Gemini may output [HANDOFF_NEEDED] when it decides the customer needs a human
         if "[HANDOFF_NEEDED]" in reply_text:
-            reply_text = "خلني أتواصل مع المسؤول ويرد عليك"
+            reply_text = HANDOFF_REPLY
             handoff_detected = True
 
     # Create handoff request so it appears in the dashboard

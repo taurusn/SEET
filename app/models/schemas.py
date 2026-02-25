@@ -356,3 +356,10 @@ class PlaygroundChatResponse(BaseModel):
     user_message: MessageResponse
     ai_message: MessageResponse
     handoff_detected: bool = False
+
+
+# ─── Owner Reply Schema ──────────────────────────────────────────────────────
+
+
+class OwnerReplyRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=2000)
