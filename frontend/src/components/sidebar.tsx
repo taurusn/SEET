@@ -13,7 +13,8 @@ import {
   LogOut,
   FlaskConical,
 } from "lucide-react";
-import { useRef, useState, useCallback } from "react";
+import { useRef, useState, useCallback, useEffect } from "react";
+import { api } from "@/lib/api";
 
 const navItems = [
   { href: "/", label: "لوحة التحكم", icon: LayoutDashboard },
@@ -28,8 +29,23 @@ export function Dock() {
   const pathname = usePathname();
   const { logout } = useAuth();
   const [mouseX, setMouseX] = useState<number | null>(null);
+  const [handoffCount, setHandoffCount] = useState(0);
   const dockRef = useRef<HTMLDivElement>(null);
   const itemRefs = useRef<(HTMLElement | null)[]>([]);
+
+  // Fetch active handoff count
+  useEffect(() => {
+    const fetchHandoffs = () => {
+      api
+        .get<{ active_handoffs: number }>("/api/v1/shop/stats")
+        .then((data) => setHandoffCount(data.active_handoffs))
+        .catch(() => {});
+    };
+
+    fetchHandoffs();
+    const interval = setInterval(fetchHandoffs, 30000); // refresh every 30s
+    return () => clearInterval(interval);
+  }, []);
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     setMouseX(e.clientX);
@@ -70,6 +86,7 @@ export function Dock() {
             (item.href !== "/" && pathname.startsWith(item.href));
           const scale = getScale(i);
           const Icon = item.icon;
+          const showBadge = item.href === "/handoffs" && handoffCount > 0;
 
           return (
             <div
@@ -83,7 +100,7 @@ export function Dock() {
               <Link href={item.href} className="block">
                 <div
                   className={cn(
-                    "w-11 h-11 md:w-12 md:h-12 rounded-[13px] flex items-center justify-center",
+                    "dock-icon w-11 h-11 md:w-12 md:h-12 rounded-[13px] flex items-center justify-center relative",
                     isActive
                       ? "bg-primary text-white dock-icon-active"
                       : "bg-white/[0.08] text-white/60 hover:bg-white/[0.15] hover:text-white/90"
@@ -98,11 +115,19 @@ export function Dock() {
                   }}
                 >
                   <Icon className="w-[22px] h-[22px]" />
+                  {showBadge && (
+                    <span className="dock-badge">
+                      {handoffCount > 9 ? "9+" : handoffCount}
+                    </span>
+                  )}
                 </div>
               </Link>
-              {isActive && (
-                <div className="w-1 h-1 rounded-full bg-white/90 mt-0.5" />
-              )}
+              <div
+                className={cn(
+                  "dock-active-dot",
+                  isActive && "dock-active-dot-visible"
+                )}
+              />
             </div>
           );
         })}
@@ -113,16 +138,16 @@ export function Dock() {
         {/* Logout */}
         <div
           ref={(el) => {
-            itemRefs.current[navItems.length + 1] = el;
+            itemRefs.current[navItems.length] = el;
           }}
           className="dock-item group relative flex flex-col items-center"
         >
           <span className="dock-tooltip">تسجيل خروج</span>
           <button onClick={logout} className="block">
             <div
-              className="w-11 h-11 md:w-12 md:h-12 rounded-[13px] flex items-center justify-center bg-white/[0.08] text-white/60 hover:bg-red-500/20 hover:text-red-400"
+              className="dock-icon w-11 h-11 md:w-12 md:h-12 rounded-[13px] flex items-center justify-center bg-white/[0.08] text-white/60 hover:bg-red-500/20 hover:text-red-400"
               style={{
-                transform: `scale(${getScale(navItems.length + 1)})`,
+                transform: `scale(${getScale(navItems.length)})`,
                 transformOrigin: "bottom center",
                 transition:
                   mouseX !== null
