@@ -106,6 +106,9 @@ export function ConversationThread({ conversationId }: ConversationThreadProps) 
                     : "bg-primary text-primary-foreground rounded-bl-sm"
                 )}
               >
+                <span className="copy-label" aria-hidden="true">
+                  {isCustomer ? "العميل: " : "الموظف: "}
+                </span>
                 {msg.content}
               </div>
             </div>
