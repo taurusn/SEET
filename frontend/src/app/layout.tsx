@@ -10,8 +10,12 @@ const ibmPlex = IBM_Plex_Sans_Arabic({
 });
 
 export const metadata: Metadata = {
-  title: "Cafe Reply - لوحة التحكم",
+  title: "SEET - لوحة التحكم",
   description: "منصة الردود الذكية للمحلات",
+  icons: {
+    icon: "/seet-ee.png",
+    apple: "/seet-ee.png",
+  },
 };
 
 export default function RootLayout({
