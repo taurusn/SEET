@@ -712,14 +712,17 @@ async def playground_chat(
         context, history, data.message, conversation_id=str(convo.id),
     )
 
-    if "[HANDOFF_NEEDED]" in reply_text:
+    if "[HANDOFF_NEEDED" in reply_text:
+        import re
+        reason_match = re.search(r"\[HANDOFF_NEEDED:\s*(.+?)\]", reply_text)
+        handoff_reason = reason_match.group(1).strip() if reason_match else f"رسالة العميل: {data.message}"
         reply_text = HANDOFF_REPLY
         handoff_detected = True
 
     # Create handoff request so it appears in the dashboard
     if handoff_detected:
         await trigger_handoff(
-            db, str(convo.id), reason=f"Customer said: {data.message}"
+            db, str(convo.id), reason=handoff_reason
         )
 
     # Save AI reply
