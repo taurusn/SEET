@@ -1,6 +1,7 @@
 "use client";
 
 import { cn, formatDate } from "@/lib/utils";
+import { Ticket } from "lucide-react";
 
 interface Voucher {
   id: string;
@@ -28,8 +29,12 @@ const statusBadge: Record<string, { label: string; className: string }> = {
 export function VoucherTable({ vouchers, onRedeem, redeeming }: VoucherTableProps) {
   if (vouchers.length === 0) {
     return (
-      <div className="text-center py-12 text-muted-foreground">
-        لا توجد قسائم
+      <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+        <div className="w-14 h-14 rounded-2xl bg-muted flex items-center justify-center mb-3">
+          <Ticket className="w-7 h-7 opacity-50" />
+        </div>
+        <p className="font-medium text-foreground/60">لا توجد قسائم</p>
+        <p className="text-xs mt-1">القسائم المصدرة ستظهر هنا</p>
       </div>
     );
   }
@@ -59,7 +64,7 @@ export function VoucherTable({ vouchers, onRedeem, redeeming }: VoucherTableProp
                 <td className="py-3 px-4">{v.customer_id}</td>
                 <td className="py-3 px-4">
                   <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
-                    {v.platform === "instagram" ? "IG" : "WA"}
+                    {v.platform === "instagram" ? "انستقرام" : "واتساب"}
                   </span>
                 </td>
                 <td className="py-3 px-4 text-muted-foreground">
@@ -85,7 +90,7 @@ export function VoucherTable({ vouchers, onRedeem, redeeming }: VoucherTableProp
                       disabled={redeeming === v.id}
                       className="text-xs font-medium px-3 py-1.5 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors disabled:opacity-50"
                     >
-                      {redeeming === v.id ? "..." : "تم الاستخدام"}
+                      {redeeming === v.id ? "جاري التحديث..." : "تم الاستخدام"}
                     </button>
                   )}
                 </td>

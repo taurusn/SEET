@@ -37,6 +37,7 @@ export default function SettingsPage() {
   const [contexts, setContexts] = useState<ShopContext[]>([]);
   const [tiers, setTiers] = useState<Tier[]>([]);
   const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
   const [profileForm, setProfileForm] = useState({
     name: "",
     ig_page_id: "",
@@ -75,6 +76,8 @@ export default function SettingsPage() {
       const shopData = JSON.parse(localStorage.getItem("shop") || "{}");
       Object.assign(shopData, profileForm);
       localStorage.setItem("shop", JSON.stringify(shopData));
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
     } finally {
       setSaving(false);
     }
@@ -170,13 +173,21 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            <button
-              type="submit"
-              disabled={saving}
-              className="px-6 py-2.5 rounded-xl bg-primary text-primary-foreground font-medium hover:bg-primary/90 transition-colors disabled:opacity-50"
-            >
-              {saving ? "جاري الحفظ..." : "حفظ التغييرات"}
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                type="submit"
+                disabled={saving}
+                className="px-6 py-2.5 rounded-xl bg-primary text-primary-foreground font-medium hover:bg-primary/90 transition-colors disabled:opacity-50"
+              >
+                {saving ? "جاري الحفظ..." : "حفظ التغييرات"}
+              </button>
+              {saved && (
+                <span className="text-sm text-success font-medium animate-toast flex items-center gap-1.5">
+                  <CheckCircle className="w-4 h-4" />
+                  تم الحفظ
+                </span>
+              )}
+            </div>
           </form>
         </div>
       )}

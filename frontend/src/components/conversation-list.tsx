@@ -24,8 +24,8 @@ const statusColors: Record<string, string> = {
 };
 
 const platformLabels: Record<string, string> = {
-  instagram: "IG",
-  whatsapp: "WA",
+  instagram: "انستقرام",
+  whatsapp: "واتساب",
 };
 
 export function ConversationList({
@@ -35,9 +35,12 @@ export function ConversationList({
 }: ConversationListProps) {
   if (conversations.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-        <MessageSquare className="w-10 h-10 mb-3 opacity-40" />
-        <p>لا توجد محادثات</p>
+      <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+        <div className="w-14 h-14 rounded-2xl bg-muted flex items-center justify-center mb-3">
+          <MessageSquare className="w-7 h-7 opacity-50" />
+        </div>
+        <p className="font-medium text-foreground/60">لا توجد محادثات</p>
+        <p className="text-xs mt-1">المحادثات الجديدة ستظهر هنا</p>
       </div>
     );
   }
@@ -49,8 +52,10 @@ export function ConversationList({
           key={convo.id}
           onClick={() => onSelect(convo.id)}
           className={cn(
-            "w-full text-right p-4 hover:bg-muted/50 transition-colors",
-            selectedId === convo.id && "bg-primary/5 border-r-2 border-primary"
+            "w-full text-right p-4 transition-colors",
+            selectedId === convo.id
+              ? "bg-primary/10 border-r-2 border-primary"
+              : "hover:bg-muted/50"
           )}
         >
           <div className="flex items-center justify-between mb-1">

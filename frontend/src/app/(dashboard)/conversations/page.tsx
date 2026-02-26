@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { ConversationList } from "@/components/conversation-list";
 import { ConversationThread } from "@/components/conversation-thread";
+import { MessageSquare } from "lucide-react";
 
 interface Conversation {
   id: string;
@@ -99,8 +100,11 @@ export default function ConversationsPage() {
               <ConversationThread conversationId={selectedId} />
             </div>
           ) : (
-            <div className="flex items-center justify-center py-24 text-muted-foreground">
-              اختر محادثة لعرضها
+            <div className="flex flex-col items-center justify-center py-24 text-muted-foreground">
+              <div className="w-14 h-14 rounded-2xl bg-muted flex items-center justify-center mb-3">
+                <MessageSquare className="w-7 h-7 opacity-50" />
+              </div>
+              <p className="font-medium text-foreground/60">اختر محادثة لعرضها</p>
             </div>
           )}
         </div>
