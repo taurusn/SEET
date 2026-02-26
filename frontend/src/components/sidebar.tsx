@@ -47,12 +47,25 @@ export function Dock() {
     return () => clearInterval(interval);
   }, []);
 
+  const touchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     setMouseX(e.clientX);
   }, []);
 
   const handleMouseLeave = useCallback(() => {
     setMouseX(null);
+  }, []);
+
+  // On touch, auto-reset scale after 2 seconds since there's no mouseLeave
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    if (touchTimer.current) clearTimeout(touchTimer.current);
+    const touch = e.touches[0];
+    if (touch) setMouseX(touch.clientX);
+    touchTimer.current = setTimeout(() => {
+      setMouseX(null);
+      touchTimer.current = null;
+    }, 2000);
   }, []);
 
   const getScale = useCallback(
@@ -78,6 +91,7 @@ export function Dock() {
         ref={dockRef}
         onMouseMove={handleMouseMove}
         onMouseLeave={handleMouseLeave}
+        onTouchStart={handleTouchStart}
         className="dock-glass flex items-end gap-1 px-2.5 pb-2 pt-2 rounded-[22px]"
       >
         {navItems.map((item, i) => {
