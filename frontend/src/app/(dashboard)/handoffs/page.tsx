@@ -127,8 +127,8 @@ export default function HandoffsPage() {
 
       {/* Voucher issue modal */}
       {voucherModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-card rounded-2xl border border-border shadow-xl w-full max-w-md p-6">
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-card rounded-2xl border border-border shadow-xl w-full max-w-md p-6 animate-scale-in">
             <h2 className="text-lg font-bold mb-1">إصدار قسيمة تعويض</h2>
             <p className="text-sm text-muted-foreground mb-4">
               اختر نوع التعويض للعميل

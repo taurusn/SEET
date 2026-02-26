@@ -92,8 +92,12 @@ export default function DashboardPage() {
           </Link>
         </div>
         {recent.length === 0 ? (
-          <div className="p-8 text-center text-muted-foreground">
-            لا توجد محادثات بعد
+          <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+            <div className="w-12 h-12 rounded-2xl bg-muted flex items-center justify-center mb-3">
+              <MessageSquare className="w-6 h-6 opacity-50" />
+            </div>
+            <p className="text-sm font-medium text-foreground/60">لا توجد محادثات بعد</p>
+            <p className="text-xs mt-1">المحادثات الجديدة ستظهر هنا</p>
           </div>
         ) : (
           <div className="divide-y divide-border">
