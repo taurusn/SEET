@@ -258,8 +258,12 @@ async def process_message(msg: dict) -> None:
                     context, history, text, conversation_id=str(convo.id),
                 )
 
-                if "[HANDOFF_NEEDED]" in reply:
-                    await trigger_handoff(db, str(convo.id), reason=f"Customer said: {text}")
+                if "[HANDOFF_NEEDED" in reply:
+                    # Parse AI-generated reason from [HANDOFF_NEEDED: reason]
+                    import re
+                    reason_match = re.search(r"\[HANDOFF_NEEDED:\s*(.+?)\]", reply)
+                    reason = reason_match.group(1).strip() if reason_match else f"رسالة العميل: {text}"
+                    await trigger_handoff(db, str(convo.id), reason=reason)
                     reply = HANDOFF_REPLY
 
                 # Save outbound message
