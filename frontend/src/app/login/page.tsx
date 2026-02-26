@@ -42,9 +42,9 @@ export default function LoginPage() {
           <Image
             src="/seet-logo.png"
             alt="SEET"
-            width={120}
-            height={46}
-            className="mx-auto mb-4 h-11 w-auto"
+            width={200}
+            height={77}
+            className="mx-auto mb-4 h-16 w-auto"
             priority
           />
           <p className="text-muted-foreground mt-1">سجل دخولك لإدارة محلك</p>
