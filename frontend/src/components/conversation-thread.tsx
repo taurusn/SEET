@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { api } from "@/lib/api";
 import { cn, timeAgo } from "@/lib/utils";
 import { Bot, User, MessageSquare } from "lucide-react";
@@ -22,6 +22,7 @@ export function ConversationThread({ conversationId }: ConversationThreadProps) 
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
   const endRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -39,6 +40,33 @@ export function ConversationThread({ conversationId }: ConversationThreadProps) 
       endRef.current.scrollIntoView({ behavior: "smooth" });
     }
   }, [loading, messages]);
+
+  // Intercept copy to prepend sender labels (العميل / الموظف)
+  const handleCopy = useCallback((e: React.ClipboardEvent) => {
+    const selection = window.getSelection();
+    if (!selection || !selection.rangeCount) return;
+
+    const container = containerRef.current;
+    if (!container) return;
+
+    const bubbles = container.querySelectorAll("[data-sender]");
+    const lines: string[] = [];
+
+    bubbles.forEach((bubble) => {
+      if (selection.containsNode(bubble, true)) {
+        const sender = bubble.getAttribute("data-sender");
+        const text = bubble.textContent?.trim();
+        if (text) {
+          lines.push(`${sender}: ${text}`);
+        }
+      }
+    });
+
+    if (lines.length > 0) {
+      e.preventDefault();
+      e.clipboardData?.setData("text/plain", lines.join("\n"));
+    }
+  }, []);
 
   if (loading) {
     return (
@@ -61,10 +89,9 @@ export function ConversationThread({ conversationId }: ConversationThreadProps) 
   }
 
   return (
-    <div className="space-y-3 p-4">
+    <div ref={containerRef} onCopy={handleCopy} className="space-y-3 p-4">
       {messages.map((msg, i) => {
         const isCustomer = msg.direction === "inbound";
-        // Show timestamp if first message or 10+ min gap from previous
         const showTime =
           i === 0 ||
           new Date(msg.created_at).getTime() -
@@ -99,6 +126,7 @@ export function ConversationThread({ conversationId }: ConversationThreadProps) 
                 )}
               </div>
               <div
+                data-sender={isCustomer ? "العميل" : "الموظف"}
                 className={cn(
                   "rounded-2xl px-4 py-2.5 text-sm leading-relaxed",
                   isCustomer
@@ -106,9 +134,6 @@ export function ConversationThread({ conversationId }: ConversationThreadProps) 
                     : "bg-primary text-primary-foreground rounded-bl-sm"
                 )}
               >
-                <span className="copy-label" aria-hidden="true">
-                  {isCustomer ? "العميل: " : "الموظف: "}
-                </span>
                 {msg.content}
               </div>
             </div>

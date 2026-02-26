@@ -144,18 +144,6 @@ body {
   100% { transform: scale(1); }
 }
 
-/* Hidden copy label — invisible but included when selecting/copying text */
-.copy-label {
-  position: absolute;
-  width: 0;
-  height: 0;
-  overflow: hidden;
-  opacity: 0;
-  font-size: 0;
-  line-height: 0;
-  user-select: text;
-}
-
 /* Modal animations */
 .animate-fade-in {
   animation: fade-in 0.2s ease-out;
