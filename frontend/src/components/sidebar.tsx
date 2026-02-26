@@ -80,7 +80,7 @@ export function Dock() {
       const maxDist = 150;
 
       if (distance >= maxDist) return 1;
-      return 1 + 0.4 * Math.cos((distance / maxDist) * (Math.PI / 2));
+      return 1 + 0.2 * Math.cos((distance / maxDist) * (Math.PI / 2));
     },
     [mouseX]
   );
