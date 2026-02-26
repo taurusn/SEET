@@ -13,8 +13,8 @@ export const metadata: Metadata = {
   title: "SEET - لوحة التحكم",
   description: "منصة الردود الذكية للمحلات",
   icons: {
-    icon: "/seet-ee.png",
-    apple: "/seet-ee.png",
+    icon: "/seet-s.png",
+    apple: "/seet-s.png",
   },
 };
 
