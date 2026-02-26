@@ -38,9 +38,9 @@ export default function DashboardLayout({
           <Image
             src="/seet-logo.png"
             alt="SEET"
-            width={140}
-            height={54}
-            className="h-9 w-auto"
+            width={160}
+            height={160}
+            className="w-28"
             priority
           />
           {shop && (

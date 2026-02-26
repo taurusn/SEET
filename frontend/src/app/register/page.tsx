@@ -44,9 +44,9 @@ export default function RegisterPage() {
           <Image
             src="/seet-logo.png"
             alt="SEET"
-            width={200}
-            height={77}
-            className="mx-auto mb-4 h-16 w-auto"
+            width={280}
+            height={280}
+            className="mx-auto mb-2 w-56"
             priority
           />
           <p className="text-muted-foreground mt-1">سجل محلك وابدأ بالردود الذكية</p>
