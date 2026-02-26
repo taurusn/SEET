@@ -65,7 +65,7 @@ export function Dock() {
     touchTimer.current = setTimeout(() => {
       setMouseX(null);
       touchTimer.current = null;
-    }, 2000);
+    }, 1000);
   }, []);
 
   const getScale = useCallback(

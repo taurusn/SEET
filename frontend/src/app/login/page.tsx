@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { Coffee } from "lucide-react";
+import Image from "next/image";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -39,10 +39,14 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-primary/10 mb-4">
-            <Coffee className="w-8 h-8 text-primary" />
-          </div>
-          <h1 className="text-2xl font-bold">Cafe Reply</h1>
+          <Image
+            src="/seet-logo.png"
+            alt="SEET"
+            width={120}
+            height={46}
+            className="mx-auto mb-4 h-11 w-auto"
+            priority
+          />
           <p className="text-muted-foreground mt-1">سجل دخولك لإدارة محلك</p>
         </div>
 
