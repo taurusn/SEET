@@ -159,7 +159,7 @@ export function Dock() {
           <span className="dock-tooltip">تسجيل خروج</span>
           <button onClick={logout} className="block">
             <div
-              className="dock-icon w-11 h-11 md:w-12 md:h-12 rounded-[13px] flex items-center justify-center bg-white/[0.08] text-white/60 hover:bg-red-500/20 hover:text-red-400"
+              className="dock-icon w-11 h-11 md:w-12 md:h-12 rounded-[13px] flex items-center justify-center bg-white/[0.08] text-white/60 hover:bg-danger/20 hover:text-danger"
               style={{
                 transform: `scale(${getScale(navItems.length)})`,
                 transformOrigin: "bottom center",

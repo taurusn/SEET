@@ -21,23 +21,23 @@
 }
 
 :root {
-  --background: #faf7f2;
-  --foreground: #1c1917;
+  --background: #f8fafa;
+  --foreground: #0f172a;
   --card: #ffffff;
-  --card-foreground: #1c1917;
-  --border: #e7e5e4;
-  --muted: #f5f5f4;
-  --muted-foreground: #78716c;
-  --primary: #b45309;
+  --card-foreground: #0f172a;
+  --border: #e2e8f0;
+  --muted: #f0fdfa;
+  --muted-foreground: #64748b;
+  --primary: #115e59;
   --primary-foreground: #ffffff;
-  --accent: #f59e0b;
-  --accent-foreground: #451a03;
+  --accent: #2dd4bf;
+  --accent-foreground: #134e4a;
   --success: #16a34a;
   --warning: #d97706;
   --danger: #dc2626;
-  --sidebar: #292524;
-  --sidebar-foreground: #e7e5e4;
-  --sidebar-active: #b45309;
+  --sidebar: #0a2a2a;
+  --sidebar-foreground: #ccfbf1;
+  --sidebar-active: #115e59;
 }
 
 body {
@@ -53,7 +53,7 @@ body {
 
 /* Dock */
 .dock-glass {
-  background: rgba(30, 28, 27, 0.72);
+  background: rgba(10, 35, 35, 0.78);
   backdrop-filter: blur(24px) saturate(180%);
   -webkit-backdrop-filter: blur(24px) saturate(180%);
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -64,7 +64,7 @@ body {
 }
 
 .dock-icon-active {
-  box-shadow: 0 4px 16px rgba(180, 83, 9, 0.4);
+  box-shadow: 0 4px 16px rgba(17, 94, 89, 0.45);
 }
 
 /* Touch feedback for mobile */
@@ -79,7 +79,7 @@ body {
   bottom: calc(100% + 10px);
   left: 50%;
   transform: translateX(-50%) translateY(4px);
-  background: rgba(30, 28, 27, 0.92);
+  background: rgba(10, 35, 35, 0.92);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   color: #fff;
