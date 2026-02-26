@@ -158,7 +158,7 @@ export default function PlaygroundPage() {
                   </button>
                   <button
                     onClick={() => handleDelete(convo.id)}
-                    className="p-2 ml-1 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-red-500 transition-all"
+                    className="p-2 ml-1 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-danger transition-all"
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
