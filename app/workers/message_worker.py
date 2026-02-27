@@ -229,6 +229,16 @@ async def process_message(msg: dict) -> None:
                     db, convo.id, "inbound", text, "customer", meta_message_id
                 )
 
+                # Publish inbound event for SSE
+                await redis_client.publish_event(str(shop.id), {
+                    "type": "new_message",
+                    "direction": "inbound",
+                    "conversation_id": str(convo.id),
+                    "customer_id": customer_id,
+                    "platform": platform,
+                    "preview": text[:100],
+                })
+
                 # If human handoff is active, send ONE holding reply then stay silent
                 if convo.status == "human":
                     if await redis_client.claim_hold_reply(str(convo.id)):
@@ -283,12 +293,30 @@ async def process_message(msg: dict) -> None:
                     reason = result.handoff_reason or f"رسالة العميل: {text}"
                     await trigger_handoff(db, str(convo.id), reason=reason)
                     reply = HANDOFF_REPLY
+
+                    # Publish handoff event for SSE
+                    await redis_client.publish_event(str(shop.id), {
+                        "type": "handoff_triggered",
+                        "conversation_id": str(convo.id),
+                        "customer_id": customer_id,
+                        "platform": platform,
+                        "reason": reason,
+                    })
                 else:
                     reply = result.reply
 
                 # Save outbound message
                 outbound_msg = await save_message(db, convo.id, "outbound", reply, "ai")
                 await db.commit()
+
+                # Publish outbound event for SSE
+                await redis_client.publish_event(str(shop.id), {
+                    "type": "new_message",
+                    "direction": "outbound",
+                    "conversation_id": str(convo.id),
+                    "sender_type": "ai",
+                    "preview": reply[:100],
+                })
 
                 # Push to outbound queue (after commit so DB state is consistent)
                 await rabbitmq.publish(OUTBOUND_QUEUE, {

@@ -47,7 +47,7 @@ Phase 2 (Requires Phase 1):
   F5: Analytics Dashboard        [L]  ✅ DONE
 
 Phase 3 (Benefits from everything being in place):
-  F4: Real-time + Notifications  [L]  ← SSE infrastructure, browser push
+  F4: Real-time + Notifications  [L]  ✅ DONE
 ```
 
 ---
