@@ -9,6 +9,7 @@ import {
   MessageSquare,
   ArrowUpRight,
   TrendingUp,
+  Download,
 } from "lucide-react";
 
 interface Analytics {
@@ -66,22 +67,44 @@ export default function AnalyticsPage() {
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold">التحليلات</h1>
 
-        {/* Period selector */}
-        <div className="flex gap-1 bg-muted rounded-xl p-1">
-          {periods.map((p) => (
-            <button
-              key={p.value}
-              onClick={() => setPeriod(p.value)}
-              className={cn(
-                "px-3 py-1.5 text-sm font-medium rounded-lg transition-colors",
-                period === p.value
-                  ? "bg-card text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              {p.label}
-            </button>
-          ))}
+        <div className="flex items-center gap-3">
+          {/* Export CSV */}
+          <button
+            onClick={async () => {
+              const token = localStorage.getItem("token");
+              const res = await fetch(`/api/v1/shop/analytics/export?period=${period}`, {
+                headers: { Authorization: `Bearer ${token}` },
+              });
+              const blob = await res.blob();
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = `analytics-${period}.csv`;
+              a.click();
+              URL.revokeObjectURL(url);
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted border border-border transition-colors"
+          >
+            <Download className="w-3.5 h-3.5" />
+            تصدير CSV
+          </button>
+          {/* Period selector */}
+          <div className="flex gap-1 bg-muted rounded-xl p-1">
+            {periods.map((p) => (
+              <button
+                key={p.value}
+                onClick={() => setPeriod(p.value)}
+                className={cn(
+                  "px-3 py-1.5 text-sm font-medium rounded-lg transition-colors",
+                  period === p.value
+                    ? "bg-card text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 

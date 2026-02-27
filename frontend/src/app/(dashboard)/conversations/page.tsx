@@ -6,7 +6,7 @@ import { api } from "@/lib/api";
 import type { SSEEvent } from "@/lib/sse";
 import { ConversationList } from "@/components/conversation-list";
 import { ConversationThread } from "@/components/conversation-thread";
-import { MessageSquare, XCircle } from "lucide-react";
+import { MessageSquare, XCircle, Search, Download } from "lucide-react";
 
 interface Conversation {
   id: string;
@@ -19,6 +19,7 @@ interface Conversation {
 
 interface CustomerProfile {
   display_name?: string;
+  notes?: string | null;
   total_conversations: number;
   first_seen_at: string;
 }
@@ -30,15 +31,26 @@ export default function ConversationsPage() {
   const [customerProfile, setCustomerProfile] = useState<CustomerProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState({ platform: "", status: "" });
+  const [search, setSearch] = useState("");
+  const [searchDebounced, setSearchDebounced] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
+  const [customerNotes, setCustomerNotes] = useState("");
+  const [notesSaved, setNotesSaved] = useState(false);
   const selectedIdRef = useRef(selectedId);
   selectedIdRef.current = selectedId;
+
+  // Debounce search input
+  useEffect(() => {
+    const t = setTimeout(() => setSearchDebounced(search), 300);
+    return () => clearTimeout(t);
+  }, [search]);
 
   const fetchConversations = useCallback(() => {
     const params = new URLSearchParams();
     params.set("limit", "100");
     if (filter.platform) params.set("platform", filter.platform);
     if (filter.status) params.set("status", filter.status);
+    if (searchDebounced) params.set("search", searchDebounced);
 
     return api
       .get<Conversation[]>(`/api/v1/shop/conversations?${params}`)
@@ -48,7 +60,7 @@ export default function ConversationsPage() {
           setSelectedId(data[0].id);
         }
       });
-  }, [filter]);
+  }, [filter, searchDebounced]);
 
   useEffect(() => {
     setLoading(true);
@@ -85,22 +97,42 @@ export default function ConversationsPage() {
   useEffect(() => {
     if (!selectedId) {
       setCustomerProfile(null);
+      setCustomerNotes("");
       return;
     }
     const convo = conversations.find((c) => c.id === selectedId);
     if (convo && convo.platform !== "playground") {
       api
         .get<CustomerProfile>(`/api/v1/shop/customers/${convo.platform}/${convo.customer_id}`)
-        .then(setCustomerProfile)
-        .catch(() => setCustomerProfile(null));
+        .then((p) => {
+          setCustomerProfile(p);
+          setCustomerNotes(p.notes || "");
+        })
+        .catch(() => {
+          setCustomerProfile(null);
+          setCustomerNotes("");
+        });
     } else {
       setCustomerProfile(null);
+      setCustomerNotes("");
     }
   }, [selectedId]);
 
   return (
     <div>
       <h1 className="text-2xl font-bold mb-6">المحادثات</h1>
+
+      {/* Search */}
+      <div className="relative mb-3">
+        <Search size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+        <input
+          type="text"
+          placeholder="بحث عن عميل أو محتوى..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="w-full pr-9 pl-4 py-2 rounded-xl border border-border bg-card text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+        />
+      </div>
 
       {/* Filters */}
       <div className="flex gap-3 mb-4">
@@ -168,20 +200,63 @@ export default function ConversationsPage() {
                           : "واتساب"}
                     </p>
                   </div>
-                  {conversations.find((c) => c.id === selectedId)?.status !== "closed" && (
+                  <div className="flex items-center gap-1">
                     <button
                       onClick={async () => {
-                        await api.post(`/api/v1/shop/conversations/${selectedId}/close`, {});
-                        fetchConversations();
-                        setRefreshKey((k) => k + 1);
+                        const token = localStorage.getItem("token");
+                        const res = await fetch(`/api/v1/shop/conversations/${selectedId}/export?format=txt`, {
+                          headers: { Authorization: `Bearer ${token}` },
+                        });
+                        const blob = await res.blob();
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement("a");
+                        a.href = url;
+                        a.download = `conversation-${selectedId}.txt`;
+                        a.click();
+                        URL.revokeObjectURL(url);
                       }}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground hover:text-danger hover:bg-danger/10 transition-colors"
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
                     >
-                      <XCircle className="w-3.5 h-3.5" />
-                      إغلاق
+                      <Download className="w-3.5 h-3.5" />
+                      تصدير
                     </button>
-                  )}
+                    {conversations.find((c) => c.id === selectedId)?.status !== "closed" && (
+                      <button
+                        onClick={async () => {
+                          await api.post(`/api/v1/shop/conversations/${selectedId}/close`, {});
+                          fetchConversations();
+                          setRefreshKey((k) => k + 1);
+                        }}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground hover:text-danger hover:bg-danger/10 transition-colors"
+                      >
+                        <XCircle className="w-3.5 h-3.5" />
+                        إغلاق
+                      </button>
+                    )}
+                  </div>
                 </div>
+                {/* Customer notes (S-33) */}
+                {customerProfile && (
+                  <div className="px-4 pb-3 pt-1">
+                    <textarea
+                      value={customerNotes}
+                      onChange={(e) => { setCustomerNotes(e.target.value); setNotesSaved(false); }}
+                      onBlur={async () => {
+                        const convo = conversations.find((c) => c.id === selectedId);
+                        if (!convo) return;
+                        try {
+                          await api.patch(`/api/v1/shop/customers/${convo.platform}/${convo.customer_id}`, { notes: customerNotes });
+                          setNotesSaved(true);
+                          setTimeout(() => setNotesSaved(false), 2000);
+                        } catch {}
+                      }}
+                      placeholder="أضف ملاحظات عن هذا العميل..."
+                      className="w-full px-3 py-2 rounded-lg border border-border bg-background text-xs resize-none focus:outline-none focus:ring-2 focus:ring-primary/30"
+                      rows={2}
+                    />
+                    {notesSaved && <p className="text-[10px] text-success mt-0.5">تم الحفظ</p>}
+                  </div>
+                )}
               </div>
               <ConversationThread
                 conversationId={selectedId}
