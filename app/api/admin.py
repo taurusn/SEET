@@ -8,6 +8,7 @@ import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -42,6 +43,7 @@ from app.api.admin_auth import (
 from app.services.encryption import encrypt_token
 from app.services.redis_client import redis_client
 from app.services.storage import upload_logo, delete_logo
+from app.services.export import messages_to_transcript, messages_to_csv, analytics_to_csv
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 
@@ -597,3 +599,136 @@ async def get_activity_feed(
     # Sort by timestamp desc and limit
     events.sort(key=lambda e: e["timestamp"], reverse=True)
     return events[:limit]
+
+
+# ─── Conversation Audit (A-38) ─────────────────────────────────────────────
+
+
+@router.get("/shops/{shop_id}/conversations")
+async def list_shop_conversations_admin(
+    shop_id: uuid.UUID,
+    platform: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: int = Query(50, le=200),
+    offset: int = 0,
+    admin: Admin = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """List conversations for a shop (admin audit view)."""
+    shop = await db.execute(select(Shop).where(Shop.id == shop_id))
+    if not shop.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Shop not found")
+
+    stmt = select(Conversation).where(Conversation.shop_id == shop_id)
+    if platform:
+        stmt = stmt.where(Conversation.platform == platform)
+    if status:
+        stmt = stmt.where(Conversation.status == status)
+    stmt = stmt.order_by(Conversation.created_at.desc()).limit(limit).offset(offset)
+
+    result = await db.execute(stmt)
+    convos = result.scalars().all()
+    return [
+        {
+            "id": str(c.id),
+            "platform": c.platform,
+            "customer_id": c.customer_id,
+            "status": c.status,
+            "sentiment": c.sentiment,
+            "created_at": c.created_at.isoformat() if c.created_at else None,
+        }
+        for c in convos
+    ]
+
+
+@router.get("/shops/{shop_id}/conversations/{conversation_id}/messages")
+async def get_conversation_messages_admin(
+    shop_id: uuid.UUID,
+    conversation_id: uuid.UUID,
+    admin: Admin = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get messages for a conversation (admin audit view, read-only)."""
+    convo = await db.execute(
+        select(Conversation).where(
+            Conversation.id == conversation_id,
+            Conversation.shop_id == shop_id,
+        )
+    )
+    if not convo.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    result = await db.execute(
+        select(Message)
+        .where(Message.conversation_id == conversation_id)
+        .order_by(Message.created_at.asc())
+    )
+    messages = result.scalars().all()
+    return [
+        {
+            "id": str(m.id),
+            "direction": m.direction,
+            "sender_type": m.sender_type,
+            "content": m.content,
+            "created_at": m.created_at.isoformat() if m.created_at else None,
+        }
+        for m in messages
+    ]
+
+
+# ─── Shop Data Export (A-39) ──────────────────────────────────────────────
+
+
+@router.get("/shops/{shop_id}/export")
+async def export_shop_data(
+    shop_id: uuid.UUID,
+    type: str = Query("conversations", pattern="^(conversations|analytics)$"),
+    period: str = Query("30d", pattern="^(today|7d|30d)$"),
+    admin: Admin = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Export shop data as CSV (conversations or analytics)."""
+    shop = await db.execute(select(Shop).where(Shop.id == shop_id))
+    s = shop.scalar_one_or_none()
+    if not s:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
+    if type == "analytics":
+        days_map = {"today": 1, "7d": 7, "30d": 30}
+        data = await redis_client.get_analytics(str(shop_id), days_map.get(period, 30))
+        csv_content = analytics_to_csv(data)
+        return StreamingResponse(
+            iter([csv_content]),
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename={s.name}-analytics-{period}.csv"},
+        )
+
+    # type == "conversations"
+    result = await db.execute(
+        select(Conversation)
+        .where(Conversation.shop_id == shop_id)
+        .order_by(Conversation.created_at.desc())
+    )
+    convos = result.scalars().all()
+
+    all_messages = []
+    for c in convos:
+        msg_result = await db.execute(
+            select(Message)
+            .where(Message.conversation_id == c.id)
+            .order_by(Message.created_at.asc())
+        )
+        for m in msg_result.scalars():
+            all_messages.append({
+                "created_at": m.created_at,
+                "direction": m.direction,
+                "sender_type": m.sender_type,
+                "content": m.content,
+            })
+
+    csv_content = messages_to_csv(all_messages)
+    return StreamingResponse(
+        iter([csv_content]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={s.name}-conversations.csv"},
+    )
