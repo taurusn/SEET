@@ -50,6 +50,45 @@ body {
 ::-webkit-scrollbar { display: none; }
 * { -ms-overflow-style: none; scrollbar-width: none; }
 
+/* Splash screen */
+.splash-glow-1 {
+  width: 300px;
+  height: 300px;
+  border-radius: 50%;
+  top: -80px;
+  right: -60px;
+  filter: blur(80px);
+  animation: splash-drift 3s ease-in-out infinite alternate;
+}
+
+.splash-glow-2 {
+  width: 250px;
+  height: 250px;
+  border-radius: 50%;
+  bottom: -60px;
+  left: -40px;
+  filter: blur(80px);
+  animation: splash-drift 3s ease-in-out 0.5s infinite alternate-reverse;
+}
+
+@keyframes splash-drift {
+  0% { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(20px, -15px) scale(1.1); }
+}
+
+.splash-ring {
+  border: 2px solid;
+  border-radius: 1rem;
+  margin: -12px;
+  padding: 12px;
+  animation: splash-breathe 1.5s ease-in-out infinite;
+}
+
+@keyframes splash-breathe {
+  0%, 100% { opacity: 0.3; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(1.06); }
+}
+
 /* Dock */
 .dock-glass {
   background: rgba(10, 35, 35, 0.95);
