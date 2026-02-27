@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { api } from "@/lib/api";
@@ -9,9 +9,27 @@ import Image from "next/image";
 
 export default function LoginPage() {
   const router = useRouter();
-  const { login } = useAuth();
+  const { login, token, loading: authLoading } = useAuth();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!authLoading && token) {
+      router.replace("/");
+    }
+  }, [authLoading, token, router]);
+
+  // Still checking auth — show spinner, not the form
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  // Already authenticated — useEffect will redirect, render nothing
+  if (token) return null;
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -27,7 +45,7 @@ export default function LoginPage() {
         shop_id: string;
       }>("/api/v1/auth/login", { name: shopId });
       await login(res.shop_id, res.access_token);
-      router.push("/");
+      router.replace("/");
     } catch {
       setError("اسم المحل غير موجود");
     } finally {

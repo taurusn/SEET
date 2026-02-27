@@ -30,11 +30,6 @@ class ApiClient {
     });
 
     if (res.status === 401) {
-      if (typeof window !== "undefined") {
-        localStorage.removeItem("admin_token");
-        localStorage.removeItem("admin");
-        window.location.href = "/login";
-      }
       throw new Error("Unauthorized");
     }
 
