@@ -24,7 +24,7 @@ export function AdminSidebar() {
   const { admin, logout } = useAdmin();
 
   return (
-    <aside className="fixed inset-y-0 left-0 z-40 w-56 bg-sidebar text-sidebar-foreground flex flex-col">
+    <aside className="hidden md:flex fixed inset-y-0 left-0 z-40 w-56 bg-sidebar text-sidebar-foreground flex-col">
       <div className="p-4 border-b border-white/10">
         <h2 className="text-lg font-bold">SEET Admin</h2>
         {admin && (
@@ -36,11 +36,10 @@ export function AdminSidebar() {
 
       <nav className="flex-1 p-3 space-y-1">
         {navItems.map((item) => {
-          const fullPath = `/admin${item.href === "/" ? "" : item.href}`;
           const isActive =
             item.href === "/"
-              ? pathname === "/admin" || pathname === "/admin/"
-              : pathname.startsWith(fullPath);
+              ? pathname === "/" || pathname === ""
+              : pathname.startsWith(item.href);
 
           return (
             <Link

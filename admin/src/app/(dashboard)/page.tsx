@@ -23,10 +23,22 @@ interface PlatformStats {
 
 export default function AdminDashboard() {
   const [stats, setStats] = useState<PlatformStats | null>(null);
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    api.get<PlatformStats>("/api/v1/admin/stats").then(setStats);
+    api
+      .get<PlatformStats>("/api/v1/admin/stats")
+      .then(setStats)
+      .catch((e) => setError(e.message || "Failed to load stats"));
   }, []);
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center h-64 text-danger text-sm">
+        {error}
+      </div>
+    );
+  }
 
   if (!stats) {
     return (

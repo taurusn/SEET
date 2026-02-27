@@ -47,25 +47,34 @@ export default function ShopDetailPage() {
     splash_text: "",
   });
   const [newCtx, setNewCtx] = useState({ context_type: "menu", content: "" });
+  const [error, setError] = useState("");
 
   const loadShop = useCallback(async () => {
-    const data = await api.get<ShopDetail>(`/api/v1/admin/shops/${id}`);
-    setShop(data);
-    setForm({
-      name: data.name,
-      ig_page_id: data.ig_page_id || "",
-      ig_access_token: "",
-      wa_phone_number_id: data.wa_phone_number_id || "",
-      wa_waba_id: data.wa_waba_id || "",
-      wa_access_token: "",
-      brand_color: data.brand_color || "",
-      splash_text: data.splash_text || "",
-    });
+    try {
+      const data = await api.get<ShopDetail>(`/api/v1/admin/shops/${id}`);
+      setShop(data);
+      setForm({
+        name: data.name,
+        ig_page_id: data.ig_page_id || "",
+        ig_access_token: "",
+        wa_phone_number_id: data.wa_phone_number_id || "",
+        wa_waba_id: data.wa_waba_id || "",
+        wa_access_token: "",
+        brand_color: data.brand_color || "",
+        splash_text: data.splash_text || "",
+      });
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to load shop");
+    }
   }, [id]);
 
   const loadContexts = useCallback(async () => {
-    const data = await api.get<ContextItem[]>(`/api/v1/admin/shops/${id}/context`);
-    setContexts(data);
+    try {
+      const data = await api.get<ContextItem[]>(`/api/v1/admin/shops/${id}/context`);
+      setContexts(data);
+    } catch {
+      // Non-critical: context list fails silently
+    }
   }, [id]);
 
   useEffect(() => {
@@ -75,6 +84,7 @@ export default function ShopDetailPage() {
 
   const saveProfile = async () => {
     setSaving(true);
+    setError("");
     try {
       const body: Record<string, string> = {};
       if (form.name !== shop?.name) body.name = form.name;
@@ -95,6 +105,8 @@ export default function ShopDetailPage() {
         await api.patch(`/api/v1/admin/shops/${id}`, body);
         await loadShop();
       }
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to save");
     } finally {
       setSaving(false);
     }
@@ -103,33 +115,66 @@ export default function ShopDetailPage() {
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const formData = new FormData();
-    formData.append("file", file);
-    await api.upload(`/api/v1/admin/shops/${id}/logo`, formData);
-    await loadShop();
+    setError("");
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      await api.upload(`/api/v1/admin/shops/${id}/logo`, formData);
+      await loadShop();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to upload logo");
+    }
   };
 
   const handleLogoDelete = async () => {
-    await api.delete(`/api/v1/admin/shops/${id}/logo`);
-    await loadShop();
+    setError("");
+    try {
+      await api.delete(`/api/v1/admin/shops/${id}/logo`);
+      await loadShop();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to delete logo");
+    }
   };
 
   const toggleActive = async () => {
-    await api.post(`/api/v1/admin/shops/${id}/toggle`);
-    await loadShop();
+    setError("");
+    try {
+      await api.post(`/api/v1/admin/shops/${id}/toggle`);
+      await loadShop();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to toggle status");
+    }
   };
 
   const addContext = async () => {
     if (!newCtx.content.trim()) return;
-    await api.post(`/api/v1/admin/shops/${id}/context`, newCtx);
-    setNewCtx({ context_type: "menu", content: "" });
-    await loadContexts();
+    setError("");
+    try {
+      await api.post(`/api/v1/admin/shops/${id}/context`, newCtx);
+      setNewCtx({ context_type: "menu", content: "" });
+      await loadContexts();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to add context");
+    }
   };
 
   const deleteContext = async (ctxId: string) => {
-    await api.delete(`/api/v1/admin/shops/${id}/context/${ctxId}`);
-    await loadContexts();
+    setError("");
+    try {
+      await api.delete(`/api/v1/admin/shops/${id}/context/${ctxId}`);
+      await loadContexts();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to delete context");
+    }
   };
+
+  if (!shop && error) {
+    return (
+      <div className="flex justify-center py-12 text-danger text-sm">
+        {error}
+      </div>
+    );
+  }
 
   if (!shop) {
     return (
@@ -179,6 +224,12 @@ export default function ShopDetailPage() {
           {shop.is_active ? "Deactivate" : "Activate"}
         </button>
       </div>
+
+      {error && (
+        <div className="mb-4 px-4 py-2 rounded-lg bg-danger/10 text-danger text-sm">
+          {error}
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex gap-1 mb-6 border-b border-border">
