@@ -64,7 +64,7 @@ async def seed_first_admin(data: AdminCreate, db: AsyncSession = Depends(get_db)
 
     admin = Admin(
         email=data.email.lower().strip(),
-        password_hash=hash_password(data.password),
+        password_hash=hash_password(data.password.strip()),
         name=data.name,
     )
     db.add(admin)
@@ -79,7 +79,7 @@ async def admin_login(data: AdminLogin, db: AsyncSession = Depends(get_db)):
     result = await db.execute(stmt)
     admin = result.scalar_one_or_none()
 
-    if not admin or not verify_password(data.password, admin.password_hash):
+    if not admin or not verify_password(data.password.strip(), admin.password_hash):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     if not admin.is_active:
         raise HTTPException(status_code=403, detail="Account is deactivated")
