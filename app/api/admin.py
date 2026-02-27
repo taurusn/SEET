@@ -22,6 +22,7 @@ from app.models.schemas import (
     Voucher,
     AdminCreate,
     AdminLogin,
+    AdminPasswordChange,
     AdminTokenResponse,
     AdminResponse,
     AdminShopCreate,
@@ -36,6 +37,7 @@ from app.api.admin_auth import (
     verify_password,
     create_admin_token,
     get_current_admin,
+    require_role,
 )
 from app.services.encryption import encrypt_token
 from app.services.redis_client import redis_client
@@ -91,6 +93,61 @@ async def admin_login(data: AdminLogin, db: AsyncSession = Depends(get_db)):
 async def get_admin_profile(admin: Admin = Depends(get_current_admin)):
     """Get the current admin's profile."""
     return admin
+
+
+@router.patch("/me/password")
+async def change_admin_password(
+    data: AdminPasswordChange,
+    admin: Admin = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Change the current admin's password."""
+    if not verify_password(data.current_password.strip(), admin.password_hash):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    admin.password_hash = hash_password(data.new_password.strip())
+    await db.flush()
+    return {"message": "Password updated"}
+
+
+# ─── Admin CRUD ──────────────────────────────────────────────────────────────
+
+
+@router.get("/admins", response_model=list[AdminResponse])
+async def list_admins(
+    admin: Admin = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """List all admin accounts."""
+    stmt = select(Admin).order_by(Admin.created_at.asc())
+    result = await db.execute(stmt)
+    return result.scalars().all()
+
+
+@router.post("/admins", response_model=AdminResponse, status_code=201)
+async def create_admin(
+    data: AdminCreate,
+    admin: Admin = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a new admin account (requires admin role)."""
+    existing = await db.execute(
+        select(Admin).where(Admin.email == data.email.lower().strip())
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="Email already registered")
+
+    if data.role not in ("admin", "viewer"):
+        raise HTTPException(status_code=400, detail="Role must be 'admin' or 'viewer'")
+
+    new_admin = Admin(
+        email=data.email.lower().strip(),
+        password_hash=hash_password(data.password.strip()),
+        name=data.name,
+        role=data.role,
+    )
+    db.add(new_admin)
+    await db.flush()
+    return new_admin
 
 
 # ─── Shops ────────────────────────────────────────────────────────────────────
@@ -155,7 +212,7 @@ async def list_all_shops(
 @router.post("/shops", response_model=ShopResponse, status_code=201)
 async def create_shop(
     data: AdminShopCreate,
-    admin: Admin = Depends(get_current_admin),
+    admin: Admin = Depends(require_role("admin", "superadmin")),
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new shop (onboarding)."""
@@ -218,7 +275,7 @@ async def get_shop_detail(
 async def update_shop(
     shop_id: uuid.UUID,
     data: ShopUpdate,
-    admin: Admin = Depends(get_current_admin),
+    admin: Admin = Depends(require_role("admin", "superadmin")),
     db: AsyncSession = Depends(get_db),
 ):
     """Update a shop's details."""
@@ -246,7 +303,7 @@ async def update_shop(
 @router.post("/shops/{shop_id}/toggle")
 async def toggle_shop(
     shop_id: uuid.UUID,
-    admin: Admin = Depends(get_current_admin),
+    admin: Admin = Depends(require_role("admin", "superadmin")),
     db: AsyncSession = Depends(get_db),
 ):
     """Activate or deactivate a shop."""
@@ -268,7 +325,7 @@ async def toggle_shop(
 async def upload_shop_logo(
     shop_id: uuid.UUID,
     file: UploadFile = File(...),
-    admin: Admin = Depends(get_current_admin),
+    admin: Admin = Depends(require_role("admin", "superadmin")),
     db: AsyncSession = Depends(get_db),
 ):
     """Upload a logo for a shop (multipart file → MinIO)."""
@@ -296,7 +353,7 @@ async def upload_shop_logo(
 @router.delete("/shops/{shop_id}/logo", status_code=204)
 async def remove_shop_logo(
     shop_id: uuid.UUID,
-    admin: Admin = Depends(get_current_admin),
+    admin: Admin = Depends(require_role("admin", "superadmin")),
     db: AsyncSession = Depends(get_db),
 ):
     """Remove a shop's logo from MinIO."""
@@ -330,7 +387,7 @@ async def list_shop_context(
 async def add_shop_context(
     shop_id: uuid.UUID,
     data: ShopContextCreate,
-    admin: Admin = Depends(get_current_admin),
+    admin: Admin = Depends(require_role("admin", "superadmin")),
     db: AsyncSession = Depends(get_db),
 ):
     """Add an AI context item for a shop."""
@@ -354,7 +411,7 @@ async def add_shop_context(
 async def delete_shop_context(
     shop_id: uuid.UUID,
     context_id: uuid.UUID,
-    admin: Admin = Depends(get_current_admin),
+    admin: Admin = Depends(require_role("admin", "superadmin")),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete an AI context item."""

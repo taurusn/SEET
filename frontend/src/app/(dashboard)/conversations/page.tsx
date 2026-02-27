@@ -6,7 +6,7 @@ import { api } from "@/lib/api";
 import type { SSEEvent } from "@/lib/sse";
 import { ConversationList } from "@/components/conversation-list";
 import { ConversationThread } from "@/components/conversation-thread";
-import { MessageSquare } from "lucide-react";
+import { MessageSquare, XCircle } from "lucide-react";
 
 interface Conversation {
   id: string;
@@ -147,22 +147,41 @@ export default function ConversationsPage() {
           {selectedId ? (
             <div>
               <div className="p-4 border-b border-border">
-                <div className="flex items-center gap-2">
-                  <p className="text-sm font-medium">
-                    {customerProfile?.display_name || conversations.find((c) => c.id === selectedId)?.customer_id}
-                  </p>
-                  {customerProfile && customerProfile.total_conversations > 1 && (
-                    <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-primary/10 text-primary">
-                      عميل عائد ({customerProfile.total_conversations} محادثات)
-                    </span>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-medium">
+                        {customerProfile?.display_name || conversations.find((c) => c.id === selectedId)?.customer_id}
+                      </p>
+                      {customerProfile && customerProfile.total_conversations > 1 && (
+                        <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-primary/10 text-primary">
+                          عميل عائد ({customerProfile.total_conversations} محادثات)
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {conversations.find((c) => c.id === selectedId)?.platform ===
+                      "instagram"
+                        ? "انستقرام"
+                        : conversations.find((c) => c.id === selectedId)?.platform === "playground"
+                          ? "ساحة التجربة"
+                          : "واتساب"}
+                    </p>
+                  </div>
+                  {conversations.find((c) => c.id === selectedId)?.status !== "closed" && (
+                    <button
+                      onClick={async () => {
+                        await api.post(`/api/v1/shop/conversations/${selectedId}/close`, {});
+                        fetchConversations();
+                        setRefreshKey((k) => k + 1);
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground hover:text-danger hover:bg-danger/10 transition-colors"
+                    >
+                      <XCircle className="w-3.5 h-3.5" />
+                      إغلاق
+                    </button>
                   )}
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  {conversations.find((c) => c.id === selectedId)?.platform ===
-                  "instagram"
-                    ? "انستقرام"
-                    : "واتساب"}
-                </p>
               </div>
               <ConversationThread
                 conversationId={selectedId}

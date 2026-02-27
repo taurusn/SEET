@@ -416,11 +416,17 @@ class AdminCreate(BaseModel):
     email: str
     password: str = Field(..., min_length=8)
     name: str
+    role: str = "admin"
 
 
 class AdminLogin(BaseModel):
     email: str
     password: str
+
+
+class AdminPasswordChange(BaseModel):
+    current_password: str
+    new_password: str = Field(..., min_length=8)
 
 
 class AdminTokenResponse(BaseModel):
