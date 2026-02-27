@@ -287,6 +287,15 @@ async def owner_reply(
         "message_id": str(outbound_msg.id),
     })
 
+    # Publish SSE event for live updates
+    await redis_client.publish_event(str(shop.id), {
+        "type": "new_message",
+        "direction": "outbound",
+        "conversation_id": str(convo.id),
+        "sender_type": "human",
+        "preview": data.message[:100],
+    })
+
     return outbound_msg
 
 
@@ -329,6 +338,14 @@ async def resolve_handoff_endpoint(
         raise HTTPException(status_code=404, detail="Handoff not found")
 
     await resolve_handoff(db, str(handoff.conversation_id))
+
+    # Publish SSE event for live updates
+    await redis_client.publish_event(str(shop_id), {
+        "type": "conversation_updated",
+        "conversation_id": str(handoff.conversation_id),
+        "new_status": "ai",
+    })
+
     return {"status": "resolved", "conversation_id": str(handoff.conversation_id)}
 
 

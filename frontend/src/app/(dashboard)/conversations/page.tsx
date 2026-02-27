@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
+import type { SSEEvent } from "@/lib/sse";
 import { ConversationList } from "@/components/conversation-list";
 import { ConversationThread } from "@/components/conversation-thread";
 import { MessageSquare } from "lucide-react";
@@ -29,9 +30,11 @@ export default function ConversationsPage() {
   const [customerProfile, setCustomerProfile] = useState<CustomerProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState({ platform: "", status: "" });
+  const [refreshKey, setRefreshKey] = useState(0);
+  const selectedIdRef = useRef(selectedId);
+  selectedIdRef.current = selectedId;
 
-  useEffect(() => {
-    setLoading(true);
+  const fetchConversations = useCallback(() => {
     const params = new URLSearchParams();
     params.set("limit", "100");
     if (filter.platform) params.set("platform", filter.platform);
@@ -41,12 +44,44 @@ export default function ConversationsPage() {
       .get<Conversation[]>(`/api/v1/shop/conversations?${params}`)
       .then((data) => {
         setConversations(data);
-        if (data.length > 0 && !selectedId) {
+        if (data.length > 0 && !selectedIdRef.current) {
           setSelectedId(data[0].id);
         }
-      })
-      .finally(() => setLoading(false));
+      });
   }, [filter]);
+
+  useEffect(() => {
+    setLoading(true);
+    fetchConversations();
+    setLoading(false);
+  }, [fetchConversations]);
+
+  // Listen for SSE events dispatched from layout
+  useEffect(() => {
+    function handleSSE(e: Event) {
+      const { type, data } = (e as CustomEvent<SSEEvent>).detail;
+      const convoId = data.conversation_id as string | undefined;
+
+      if (type === "new_message") {
+        // Refresh thread if it's the active conversation
+        if (convoId && convoId === selectedIdRef.current) {
+          setRefreshKey((k) => k + 1);
+        }
+        // Refresh conversation list to update order/preview
+        fetchConversations();
+      }
+
+      if (type === "handoff_triggered" || type === "conversation_updated") {
+        fetchConversations();
+        if (convoId && convoId === selectedIdRef.current) {
+          setRefreshKey((k) => k + 1);
+        }
+      }
+    }
+
+    window.addEventListener("sse", handleSSE);
+    return () => window.removeEventListener("sse", handleSSE);
+  }, [fetchConversations]);
 
   useEffect(() => {
     if (!selectedId) {
@@ -133,6 +168,7 @@ export default function ConversationsPage() {
               <ConversationThread
                 conversationId={selectedId}
                 conversationStatus={conversations.find((c) => c.id === selectedId)?.status}
+                refreshKey={refreshKey}
               />
             </div>
           ) : (

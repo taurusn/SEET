@@ -173,6 +173,19 @@ class RedisClient:
         key = f"shop:{shop_id}:context"
         await self.client.delete(key)
 
+    # ─── Pub/Sub for Real-time Events ────────────────────────────────────
+
+    async def publish_event(self, shop_id: str, event: dict) -> None:
+        """Publish a real-time event for a shop's SSE subscribers."""
+        channel = f"events:{shop_id}"
+        await self.client.publish(channel, json.dumps(event, default=str))
+
+    async def subscribe_events(self, shop_id: str):
+        """Subscribe to a shop's event channel. Returns an async pubsub object."""
+        pubsub = self.client.pubsub()
+        await pubsub.subscribe(f"events:{shop_id}")
+        return pubsub
+
     # ─── Analytics Tracking ─────────────────────────────────────────────
 
     ANALYTICS_TTL = 35 * 86400  # 35 days — ~1 month of data

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { Dock } from "@/components/sidebar";
 import { SplashScreen } from "@/components/splash-screen";
+import { useSSE, notifyHandoff, SSEEvent } from "@/lib/sse";
 import Image from "next/image";
 
 export default function DashboardLayout({
@@ -33,6 +34,18 @@ export default function DashboardLayout({
   }, [loading, token, shop]);
 
   const handleSplashDone = useCallback(() => setShowSplash(false), []);
+
+  // SSE: dispatch custom DOM events so child pages can listen
+  const handleSSE = useCallback((event: SSEEvent) => {
+    window.dispatchEvent(new CustomEvent("sse", { detail: event }));
+
+    if (event.type === "handoff_triggered") {
+      const d = event.data as { customer_id?: string; reason?: string };
+      notifyHandoff(d.customer_id || "", d.reason);
+    }
+  }, []);
+
+  useSSE(handleSSE);
 
   if (loading) {
     return (

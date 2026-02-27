@@ -35,19 +35,29 @@ export function Dock() {
   const dockRef = useRef<HTMLDivElement>(null);
   const itemRefs = useRef<(HTMLElement | null)[]>([]);
 
-  // Fetch active handoff count
-  useEffect(() => {
-    const fetchHandoffs = () => {
-      api
-        .get<{ active_handoffs: number }>("/api/v1/shop/stats")
-        .then((data) => setHandoffCount(data.active_handoffs))
-        .catch(() => {});
-    };
-
-    fetchHandoffs();
-    const interval = setInterval(fetchHandoffs, 30000); // refresh every 30s
-    return () => clearInterval(interval);
+  // Fetch active handoff count — initial load + SSE-driven refresh
+  const fetchHandoffs = useCallback(() => {
+    api
+      .get<{ active_handoffs: number }>("/api/v1/shop/stats")
+      .then((data) => setHandoffCount(data.active_handoffs))
+      .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    fetchHandoffs();
+  }, [fetchHandoffs]);
+
+  // Listen for SSE events to refresh handoff badge live
+  useEffect(() => {
+    function handleSSE(e: Event) {
+      const { type } = (e as CustomEvent).detail;
+      if (type === "handoff_triggered" || type === "conversation_updated") {
+        fetchHandoffs();
+      }
+    }
+    window.addEventListener("sse", handleSSE);
+    return () => window.removeEventListener("sse", handleSSE);
+  }, [fetchHandoffs]);
 
   const touchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 

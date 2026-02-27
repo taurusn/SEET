@@ -17,9 +17,10 @@ interface Message {
 interface ConversationThreadProps {
   conversationId: string;
   conversationStatus?: string;
+  refreshKey?: number;
 }
 
-export function ConversationThread({ conversationId, conversationStatus }: ConversationThreadProps) {
+export function ConversationThread({ conversationId, conversationStatus, refreshKey }: ConversationThreadProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
   const [replyText, setReplyText] = useState("");
@@ -46,6 +47,13 @@ export function ConversationThread({ conversationId, conversationStatus }: Conve
       .catch(() => setMessages([]))
       .finally(() => setLoading(false));
   }, [conversationId]);
+
+  // Re-fetch messages when refreshKey changes (SSE-driven)
+  useEffect(() => {
+    if (refreshKey !== undefined && refreshKey > 0) {
+      fetchMessages();
+    }
+  }, [refreshKey, fetchMessages]);
 
   useEffect(() => {
     if (!loading && endRef.current) {

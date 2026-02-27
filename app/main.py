@@ -14,6 +14,7 @@ from app.config import get_settings
 from app.api.webhooks import router as webhook_router
 from app.api.dashboard import router as dashboard_router
 from app.api.admin import router as admin_router
+from app.api.events import router as events_router
 from app.queue.rabbitmq import rabbitmq
 from app.services.redis_client import redis_client
 from app.services.storage import ensure_bucket
@@ -75,6 +76,7 @@ app.add_middleware(
 app.include_router(webhook_router)
 app.include_router(dashboard_router)
 app.include_router(admin_router)
+app.include_router(events_router)
 
 
 @app.get("/health")
