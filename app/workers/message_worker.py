@@ -260,7 +260,14 @@ async def process_message(msg: dict) -> None:
                     customer_id=customer_id,
                     text=text,
                     history=history,
+                    db=db,
+                    shop_id=str(shop.id),
+                    platform=platform,
                 )
+
+                # Store sentiment on conversation
+                if result.sentiment:
+                    convo.sentiment = result.sentiment
 
                 if result.handoff_needed:
                     reason = result.handoff_reason or f"رسالة العميل: {text}"

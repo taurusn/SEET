@@ -8,6 +8,7 @@ interface Conversation {
   platform: string;
   customer_id: string;
   status: string;
+  sentiment?: string | null;
   created_at: string;
 }
 
@@ -21,6 +22,12 @@ const statusColors: Record<string, string> = {
   ai: "bg-success",
   human: "bg-warning",
   closed: "bg-muted-foreground",
+};
+
+const sentimentColors: Record<string, string> = {
+  positive: "bg-green-500",
+  neutral: "bg-gray-400",
+  negative: "bg-red-500",
 };
 
 const platformLabels: Record<string, string> = {
@@ -74,7 +81,18 @@ export function ConversationList({
               </span>
             </div>
           </div>
-          <p className="text-sm font-medium truncate">{convo.customer_id}</p>
+          <div className="flex items-center gap-2">
+            {convo.sentiment && (
+              <span
+                className={cn(
+                  "w-2 h-2 rounded-full flex-shrink-0",
+                  sentimentColors[convo.sentiment] || "bg-gray-400"
+                )}
+                title={convo.sentiment}
+              />
+            )}
+            <p className="text-sm font-medium truncate">{convo.customer_id}</p>
+          </div>
         </button>
       ))}
     </div>

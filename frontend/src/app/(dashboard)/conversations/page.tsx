@@ -11,12 +11,20 @@ interface Conversation {
   platform: string;
   customer_id: string;
   status: string;
+  sentiment?: string | null;
   created_at: string;
+}
+
+interface CustomerProfile {
+  display_name?: string;
+  total_conversations: number;
+  first_seen_at: string;
 }
 
 export default function ConversationsPage() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [customerProfile, setCustomerProfile] = useState<CustomerProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState({ platform: "", status: "" });
 
@@ -37,6 +45,22 @@ export default function ConversationsPage() {
       })
       .finally(() => setLoading(false));
   }, [filter]);
+
+  useEffect(() => {
+    if (!selectedId) {
+      setCustomerProfile(null);
+      return;
+    }
+    const convo = conversations.find((c) => c.id === selectedId);
+    if (convo && convo.platform !== "playground") {
+      api
+        .get<CustomerProfile>(`/api/v1/shop/customers/${convo.platform}/${convo.customer_id}`)
+        .then(setCustomerProfile)
+        .catch(() => setCustomerProfile(null));
+    } else {
+      setCustomerProfile(null);
+    }
+  }, [selectedId]);
 
   return (
     <div>
@@ -87,9 +111,16 @@ export default function ConversationsPage() {
           {selectedId ? (
             <div>
               <div className="p-4 border-b border-border">
-                <p className="text-sm font-medium">
-                  {conversations.find((c) => c.id === selectedId)?.customer_id}
-                </p>
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-medium">
+                    {customerProfile?.display_name || conversations.find((c) => c.id === selectedId)?.customer_id}
+                  </p>
+                  {customerProfile && customerProfile.total_conversations > 1 && (
+                    <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-primary/10 text-primary">
+                      عميل عائد ({customerProfile.total_conversations} محادثات)
+                    </span>
+                  )}
+                </div>
                 <p className="text-xs text-muted-foreground">
                   {conversations.find((c) => c.id === selectedId)?.platform ===
                   "instagram"

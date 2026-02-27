@@ -39,6 +39,9 @@ from app.models.schemas import (
     PlaygroundChatRequest,
     PlaygroundChatResponse,
     OwnerReplyRequest,
+    CustomerProfile,
+    CustomerProfileResponse,
+    CustomerProfileUpdate,
 )
 from app.services.encryption import encrypt_token
 from app.services.redis_client import redis_client
@@ -755,3 +758,54 @@ async def delete_playground_conversation(
     await db.execute(sql_delete(Message).where(Message.conversation_id == conversation_id))
     await db.delete(convo)
     await db.flush()
+
+
+# ─── Customer Profile Endpoints ─────────────────────────────────────────────
+
+
+@router.get("/shop/customers/{platform}/{customer_id}", response_model=CustomerProfileResponse)
+async def get_customer_profile(
+    platform: str,
+    customer_id: str,
+    shop_id: uuid.UUID = Depends(get_current_shop_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get a customer profile by platform and customer_id."""
+    stmt = select(CustomerProfile).where(
+        CustomerProfile.shop_id == shop_id,
+        CustomerProfile.platform == platform,
+        CustomerProfile.customer_id == customer_id,
+    )
+    result = await db.execute(stmt)
+    profile = result.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Customer profile not found")
+    return profile
+
+
+@router.patch("/shop/customers/{platform}/{customer_id}", response_model=CustomerProfileResponse)
+async def update_customer_profile(
+    platform: str,
+    customer_id: str,
+    data: CustomerProfileUpdate,
+    shop_id: uuid.UUID = Depends(get_current_shop_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update a customer profile (display_name, notes)."""
+    stmt = select(CustomerProfile).where(
+        CustomerProfile.shop_id == shop_id,
+        CustomerProfile.platform == platform,
+        CustomerProfile.customer_id == customer_id,
+    )
+    result = await db.execute(stmt)
+    profile = result.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Customer profile not found")
+
+    if data.display_name is not None:
+        profile.display_name = data.display_name
+    if data.notes is not None:
+        profile.notes = data.notes
+
+    await db.flush()
+    return profile

@@ -434,6 +434,8 @@ export default function ShopDetailPage() {
               <option value="hours">Hours</option>
               <option value="faq">FAQ</option>
               <option value="tone">Tone</option>
+              <option value="sales">Sales</option>
+              <option value="business_hours">Business Hours (JSON)</option>
             </select>
             <textarea
               value={newCtx.content}

@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { ContextEditor } from "@/components/context-editor";
 import { CompensationTierForm } from "@/components/compensation-tier-form";
+import { BusinessHoursEditor } from "@/components/business-hours-editor";
 import { cn } from "@/lib/utils";
 import { Instagram, MessageCircle, CheckCircle, XCircle } from "lucide-react";
 
@@ -28,6 +29,7 @@ interface Tier {
 const tabs = [
   { value: "profile", label: "الملف الشخصي" },
   { value: "context", label: "سياق الذكاء" },
+  { value: "hours", label: "ساعات العمل" },
   { value: "compensation", label: "التعويضات" },
 ];
 
@@ -199,7 +201,14 @@ export default function SettingsPage() {
             هنا تعلّم الذكاء الاصطناعي عن محلك — القائمة، الأوقات، الأسئلة
             الشائعة، وأسلوب الرد.
           </p>
-          <ContextEditor contexts={contexts} onUpdate={fetchContexts} />
+          <ContextEditor contexts={contexts.filter(c => c.context_type !== "business_hours")} onUpdate={fetchContexts} />
+        </div>
+      )}
+
+      {/* Business Hours Tab */}
+      {activeTab === "hours" && (
+        <div className="max-w-2xl">
+          <BusinessHoursEditor contexts={contexts} onUpdate={fetchContexts} />
         </div>
       )}
 

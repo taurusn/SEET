@@ -11,8 +11,12 @@ import re
 import time
 from dataclasses import dataclass
 
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.services.gemini import gemini_service, build_modular_prompt
 from app.services.classifiers import classify_sentiment
+from app.services.business_hours import check_business_hours
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +67,42 @@ def _enrich_message(
     return "\n".join(parts)
 
 
+async def upsert_customer_profile(
+    db: AsyncSession,
+    shop_id: str,
+    platform: str,
+    customer_id: str,
+) -> dict | None:
+    """Upsert customer profile and return info for message enrichment.
+
+    Uses INSERT ON CONFLICT UPDATE for race-condition safety.
+    Returns dict with total_conversations, first_seen_at, last_seen_at.
+    """
+    try:
+        result = await db.execute(
+            text("""
+                INSERT INTO customer_profiles (shop_id, platform, customer_id, total_conversations, first_seen_at, last_seen_at)
+                VALUES (:shop_id, :platform, :customer_id, 1, now(), now())
+                ON CONFLICT (shop_id, platform, customer_id)
+                DO UPDATE SET
+                    total_conversations = customer_profiles.total_conversations + 1,
+                    last_seen_at = now()
+                RETURNING total_conversations, first_seen_at, last_seen_at
+            """),
+            {"shop_id": shop_id, "platform": platform, "customer_id": customer_id},
+        )
+        row = result.fetchone()
+        if row:
+            return {
+                "total_conversations": row[0],
+                "first_seen_at": row[1],
+                "last_seen_at": row[2],
+            }
+    except Exception as e:
+        logger.warning("Customer profile upsert failed: %s", e)
+    return None
+
+
 class AIPipeline:
     """Orchestrates the full AI message processing pipeline."""
 
@@ -74,6 +114,9 @@ class AIPipeline:
         text: str,
         history: list[dict],
         customer_info: dict | None = None,
+        db: AsyncSession | None = None,
+        shop_id: str | None = None,
+        platform: str | None = None,
     ) -> PipelineResult:
         """Run the full pipeline: prompt → parallel Gemini calls → post-process.
 
@@ -84,8 +127,30 @@ class AIPipeline:
             text: The customer's message
             history: Recent conversation history
             customer_info: Optional customer profile data for recognition
+            db: Optional DB session for customer profile upsert
+            shop_id: Shop UUID string (needed for customer profile)
+            platform: Platform string (needed for customer profile)
         """
         start = time.monotonic()
+
+        # ── Pre-processor: customer profile upsert ──
+        if db and shop_id and platform and not customer_info:
+            customer_info = await upsert_customer_profile(db, shop_id, platform, customer_id)
+
+        # ── Pre-processor: business hours short-circuit ──
+        business_hours_json = context.get("business_hours")
+        if business_hours_json:
+            is_open, closed_msg = check_business_hours(business_hours_json)
+            if not is_open and closed_msg:
+                elapsed = int((time.monotonic() - start) * 1000)
+                logger.info("Shop closed — skipping Gemini, sending auto-reply")
+                return PipelineResult(
+                    reply=closed_msg,
+                    handoff_needed=False,
+                    handoff_reason="",
+                    sentiment="neutral",
+                    response_time_ms=elapsed,
+                )
 
         # ── Prompt composition ──
         system_prompt = build_modular_prompt(context, customer_info)
