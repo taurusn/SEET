@@ -62,7 +62,7 @@ export default function DashboardLayout({
             <img
               src={shop.logo_url}
               alt={shop.name}
-              className="h-9 w-auto object-contain"
+              className="w-28 object-contain"
             />
           ) : (
             <Image
