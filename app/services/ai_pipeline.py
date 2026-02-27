@@ -85,7 +85,11 @@ async def upsert_customer_profile(
                 VALUES (:shop_id, :platform, :customer_id, 1, now(), now())
                 ON CONFLICT (shop_id, platform, customer_id)
                 DO UPDATE SET
-                    total_conversations = customer_profiles.total_conversations + 1,
+                    total_conversations = CASE
+                        WHEN customer_profiles.last_seen_at < now() - interval '24 hours'
+                        THEN customer_profiles.total_conversations + 1
+                        ELSE customer_profiles.total_conversations
+                    END,
                     last_seen_at = now()
                 RETURNING total_conversations, first_seen_at, last_seen_at
             """),
