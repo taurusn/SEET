@@ -203,17 +203,20 @@ export default function ConversationsPage() {
                   <div className="flex items-center gap-1">
                     <button
                       onClick={async () => {
-                        const token = localStorage.getItem("token");
-                        const res = await fetch(`/api/v1/shop/conversations/${selectedId}/export?format=txt`, {
-                          headers: { Authorization: `Bearer ${token}` },
-                        });
-                        const blob = await res.blob();
-                        const url = URL.createObjectURL(blob);
-                        const a = document.createElement("a");
-                        a.href = url;
-                        a.download = `conversation-${selectedId}.txt`;
-                        a.click();
-                        URL.revokeObjectURL(url);
+                        try {
+                          const token = localStorage.getItem("token");
+                          const res = await fetch(`/api/v1/shop/conversations/${selectedId}/export?format=txt`, {
+                            headers: { Authorization: `Bearer ${token}` },
+                          });
+                          if (!res.ok) return;
+                          const blob = await res.blob();
+                          const url = URL.createObjectURL(blob);
+                          const a = document.createElement("a");
+                          a.href = url;
+                          a.download = `conversation-${selectedId}.txt`;
+                          a.click();
+                          URL.revokeObjectURL(url);
+                        } catch { /* network error — silent */ }
                       }}
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
                     >
@@ -223,9 +226,11 @@ export default function ConversationsPage() {
                     {conversations.find((c) => c.id === selectedId)?.status !== "closed" && (
                       <button
                         onClick={async () => {
-                          await api.post(`/api/v1/shop/conversations/${selectedId}/close`, {});
-                          fetchConversations();
-                          setRefreshKey((k) => k + 1);
+                          try {
+                            await api.post(`/api/v1/shop/conversations/${selectedId}/close`, {});
+                            fetchConversations();
+                            setRefreshKey((k) => k + 1);
+                          } catch { /* error handled by api client */ }
                         }}
                         className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground hover:text-danger hover:bg-danger/10 transition-colors"
                       >
@@ -237,7 +242,7 @@ export default function ConversationsPage() {
                 </div>
                 {/* Customer notes (S-33) */}
                 {customerProfile && (
-                  <div className="px-4 pb-3 pt-1">
+                  <div className="pb-3 pt-1">
                     <textarea
                       value={customerNotes}
                       onChange={(e) => { setCustomerNotes(e.target.value); setNotesSaved(false); }}
