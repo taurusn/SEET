@@ -4,7 +4,17 @@ import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
-import { ArrowLeft, Upload, Trash2, Plus } from "lucide-react";
+import { cn } from "@/lib/utils";
+import {
+  ArrowLeft,
+  Upload,
+  Trash2,
+  Plus,
+  MessageSquare,
+  ArrowUpRight,
+  CheckCircle,
+  Clock,
+} from "lucide-react";
 
 interface ShopDetail {
   id: string;
@@ -29,6 +39,22 @@ interface ContextItem {
   updated_at: string;
 }
 
+interface Analytics {
+  total_messages: number;
+  total_escalations: number;
+  ai_handled_pct: number;
+  avg_response_time_ms: number;
+  messages_by_hour: number[];
+  messages_by_day: { date: string; messages: number; escalations: number }[];
+  sentiment_breakdown: { positive: number; neutral: number; negative: number };
+}
+
+const periods = [
+  { value: "today", label: "Today" },
+  { value: "7d", label: "7 Days" },
+  { value: "30d", label: "30 Days" },
+];
+
 export default function ShopDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -48,6 +74,8 @@ export default function ShopDetailPage() {
   });
   const [newCtx, setNewCtx] = useState({ context_type: "menu", content: "" });
   const [error, setError] = useState("");
+  const [analytics, setAnalytics] = useState<Analytics | null>(null);
+  const [analyticsPeriod, setAnalyticsPeriod] = useState("7d");
 
   const loadShop = useCallback(async () => {
     try {
@@ -81,6 +109,15 @@ export default function ShopDetailPage() {
     loadShop();
     loadContexts();
   }, [loadShop, loadContexts]);
+
+  useEffect(() => {
+    if (tab === "stats") {
+      api
+        .get<Analytics>(`/api/v1/admin/shops/${id}/analytics?period=${analyticsPeriod}`)
+        .then(setAnalytics)
+        .catch(() => setAnalytics(null));
+    }
+  }, [id, tab, analyticsPeriod]);
 
   const saveProfile = async () => {
     setSaving(true);
@@ -456,17 +493,160 @@ export default function ShopDetailPage() {
         </div>
       )}
 
-      {/* Stats Tab */}
+      {/* Stats Tab (A-40) */}
       {tab === "stats" && (
-        <div className="grid grid-cols-2 gap-4 max-w-lg">
-          <div className="bg-card border border-border rounded-lg p-4">
-            <p className="text-2xl font-bold">{shop.total_conversations}</p>
-            <p className="text-sm text-muted-foreground">Conversations</p>
+        <div>
+          {/* Period selector */}
+          <div className="flex gap-1 bg-muted rounded-lg p-1 w-fit mb-6">
+            {periods.map((p) => (
+              <button
+                key={p.value}
+                onClick={() => setAnalyticsPeriod(p.value)}
+                className={cn(
+                  "px-3 py-1 text-xs font-medium rounded-md transition-colors",
+                  analyticsPeriod === p.value
+                    ? "bg-card text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                {p.label}
+              </button>
+            ))}
           </div>
-          <div className="bg-card border border-border rounded-lg p-4">
-            <p className="text-2xl font-bold">{shop.active_handoffs}</p>
-            <p className="text-sm text-muted-foreground">Active Handoffs</p>
-          </div>
+
+          {!analytics ? (
+            <div className="flex justify-center py-12">
+              <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+            </div>
+          ) : (
+            <>
+              {/* KPI cards */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                <div className="bg-card border border-border rounded-xl p-4">
+                  <div className="flex items-center gap-2 mb-1">
+                    <MessageSquare className="w-4 h-4 text-primary" />
+                    <span className="text-xs text-muted-foreground">Messages</span>
+                  </div>
+                  <p className="text-xl font-bold">{analytics.total_messages}</p>
+                </div>
+                <div className="bg-card border border-border rounded-xl p-4">
+                  <div className="flex items-center gap-2 mb-1">
+                    <ArrowUpRight className="w-4 h-4 text-warning" />
+                    <span className="text-xs text-muted-foreground">Escalations</span>
+                  </div>
+                  <p className="text-xl font-bold">{analytics.total_escalations}</p>
+                </div>
+                <div className="bg-card border border-border rounded-xl p-4">
+                  <div className="flex items-center gap-2 mb-1">
+                    <CheckCircle className="w-4 h-4 text-success" />
+                    <span className="text-xs text-muted-foreground">AI Handled</span>
+                  </div>
+                  <p className="text-xl font-bold">{analytics.ai_handled_pct}%</p>
+                </div>
+                <div className="bg-card border border-border rounded-xl p-4">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Clock className="w-4 h-4 text-muted-foreground" />
+                    <span className="text-xs text-muted-foreground">Avg Response</span>
+                  </div>
+                  <p className="text-xl font-bold">
+                    {analytics.avg_response_time_ms < 1000
+                      ? `${analytics.avg_response_time_ms}ms`
+                      : `${(analytics.avg_response_time_ms / 1000).toFixed(1)}s`}
+                  </p>
+                </div>
+              </div>
+
+              {/* Charts row */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+                {/* Hourly distribution */}
+                <div className="bg-card border border-border rounded-xl p-5">
+                  <h3 className="text-sm font-semibold mb-3">Messages by Hour</h3>
+                  <div className="flex items-end gap-[3px] h-24">
+                    {analytics.messages_by_hour.map((v, i) => {
+                      const max = Math.max(...analytics.messages_by_hour, 1);
+                      return (
+                        <div
+                          key={i}
+                          className="flex-1 bg-primary/20 hover:bg-primary/40 rounded-sm transition-colors"
+                          style={{ height: `${(v / max) * 100}%`, minHeight: v > 0 ? "4px" : "1px" }}
+                          title={`${i}:00 — ${v} messages`}
+                        />
+                      );
+                    })}
+                  </div>
+                  <div className="flex justify-between mt-1">
+                    <span className="text-[10px] text-muted-foreground">0:00</span>
+                    <span className="text-[10px] text-muted-foreground">12:00</span>
+                    <span className="text-[10px] text-muted-foreground">23:00</span>
+                  </div>
+                </div>
+
+                {/* Sentiment breakdown */}
+                <div className="bg-card border border-border rounded-xl p-5">
+                  <h3 className="text-sm font-semibold mb-3">Sentiment</h3>
+                  {(() => {
+                    const total =
+                      analytics.sentiment_breakdown.positive +
+                      analytics.sentiment_breakdown.neutral +
+                      analytics.sentiment_breakdown.negative;
+                    if (total === 0) {
+                      return <p className="text-sm text-muted-foreground py-4 text-center">No sentiment data yet</p>;
+                    }
+                    return (
+                      <div className="space-y-3">
+                        {[
+                          { label: "Positive", value: analytics.sentiment_breakdown.positive, color: "bg-success" },
+                          { label: "Neutral", value: analytics.sentiment_breakdown.neutral, color: "bg-muted-foreground" },
+                          { label: "Negative", value: analytics.sentiment_breakdown.negative, color: "bg-danger" },
+                        ].map((s) => (
+                          <div key={s.label}>
+                            <div className="flex justify-between text-xs mb-1">
+                              <span>{s.label}</span>
+                              <span className="text-muted-foreground">
+                                {s.value} ({Math.round((s.value / total) * 100)}%)
+                              </span>
+                            </div>
+                            <div className="h-2 bg-muted rounded-full overflow-hidden">
+                              <div
+                                className={`h-full ${s.color} rounded-full transition-all`}
+                                style={{ width: `${(s.value / total) * 100}%` }}
+                              />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+
+              {/* Daily trend */}
+              {analytics.messages_by_day.length > 0 && (
+                <div className="bg-card border border-border rounded-xl p-5">
+                  <h3 className="text-sm font-semibold mb-3">Daily Messages</h3>
+                  <div className="flex items-end gap-1 h-24">
+                    {analytics.messages_by_day.map((day) => {
+                      const max = Math.max(...analytics.messages_by_day.map((d) => d.messages), 1);
+                      return (
+                        <div
+                          key={day.date}
+                          className="flex-1 bg-success/20 hover:bg-success/40 rounded-sm transition-colors"
+                          style={{ height: `${(day.messages / max) * 100}%`, minHeight: day.messages > 0 ? "4px" : "1px" }}
+                          title={`${day.date} — ${day.messages} messages`}
+                        />
+                      );
+                    })}
+                  </div>
+                  {analytics.messages_by_day.length > 1 && (
+                    <div className="flex justify-between mt-1">
+                      <span className="text-[10px] text-muted-foreground">{analytics.messages_by_day[0]?.date.slice(5)}</span>
+                      <span className="text-[10px] text-muted-foreground">{analytics.messages_by_day[analytics.messages_by_day.length - 1]?.date.slice(5)}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          )}
         </div>
       )}
     </div>

@@ -157,6 +157,8 @@ async def create_admin(
 async def list_all_shops(
     search: Optional[str] = None,
     is_active: Optional[bool] = None,
+    sort_by: Optional[str] = Query(None, pattern="^(conversations|handoffs|created|name)$"),
+    sort_dir: str = Query("desc", pattern="^(asc|desc)$"),
     limit: int = Query(50, le=200),
     offset: int = 0,
     admin: Admin = Depends(get_current_admin),
@@ -185,7 +187,17 @@ async def list_all_shops(
         stmt = stmt.where(Shop.name.ilike(f"%{search}%"))
     if is_active is not None:
         stmt = stmt.where(Shop.is_active == is_active)
-    stmt = stmt.order_by(Shop.created_at.desc()).limit(limit).offset(offset)
+
+    # Sorting (A-11)
+    sort_map = {
+        "conversations": convo_sub,
+        "handoffs": handoff_sub,
+        "created": Shop.created_at,
+        "name": Shop.name,
+    }
+    sort_col = sort_map.get(sort_by, Shop.created_at)
+    stmt = stmt.order_by(sort_col.asc() if sort_dir == "asc" else sort_col.desc())
+    stmt = stmt.limit(limit).offset(offset)
 
     result = await db.execute(stmt)
     rows = result.all()
@@ -455,3 +467,133 @@ async def get_platform_stats(
         "active_handoffs": active_handoffs.scalar() or 0,
         "total_vouchers": total_vouchers.scalar() or 0,
     }
+
+
+# ─── Analytics ──────────────────────────────────────────────────────────────
+
+
+@router.get("/shops/{shop_id}/analytics")
+async def get_shop_analytics_admin(
+    shop_id: uuid.UUID,
+    period: str = Query("7d", pattern="^(today|7d|30d)$"),
+    admin: Admin = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get analytics for a specific shop (admin view)."""
+    shop = await db.execute(select(Shop).where(Shop.id == shop_id))
+    if not shop.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Shop not found")
+
+    days_map = {"today": 1, "7d": 7, "30d": 30}
+    return await redis_client.get_analytics(str(shop_id), days_map.get(period, 7))
+
+
+@router.get("/analytics")
+async def get_platform_analytics(
+    period: str = Query("7d", pattern="^(today|7d|30d)$"),
+    admin: Admin = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Platform-wide analytics aggregated across all active shops."""
+    days_map = {"today": 1, "7d": 7, "30d": 30}
+    days = days_map.get(period, 7)
+
+    shops_result = await db.execute(
+        select(Shop.id).where(Shop.is_active.is_(True))
+    )
+    shop_ids = [str(row[0]) for row in shops_result.all()]
+
+    totals = {
+        "total_messages": 0,
+        "total_escalations": 0,
+        "avg_response_time_ms": 0,
+        "ai_handled_pct": 0,
+        "messages_by_hour": [0] * 24,
+        "messages_by_day": {},
+        "sentiment_breakdown": {"positive": 0, "neutral": 0, "negative": 0},
+    }
+    rt_sum, rt_count = 0, 0
+
+    for sid in shop_ids:
+        data = await redis_client.get_analytics(sid, days)
+        totals["total_messages"] += data.get("total_messages", 0)
+        totals["total_escalations"] += data.get("total_escalations", 0)
+
+        # Response time weighted average
+        shop_msgs = data.get("total_messages", 0)
+        shop_rt = data.get("avg_response_time_ms", 0)
+        if shop_msgs > 0 and shop_rt > 0:
+            rt_sum += shop_rt * shop_msgs
+            rt_count += shop_msgs
+
+        # Hourly
+        for i, v in enumerate(data.get("messages_by_hour", [])):
+            totals["messages_by_hour"][i] += v
+
+        # Daily
+        for day in data.get("messages_by_day", []):
+            d = day.get("date", "")
+            if d not in totals["messages_by_day"]:
+                totals["messages_by_day"][d] = {"date": d, "messages": 0, "escalations": 0}
+            totals["messages_by_day"][d]["messages"] += day.get("messages", 0)
+            totals["messages_by_day"][d]["escalations"] += day.get("escalations", 0)
+
+        # Sentiment
+        sb = data.get("sentiment_breakdown", {})
+        totals["sentiment_breakdown"]["positive"] += sb.get("positive", 0)
+        totals["sentiment_breakdown"]["neutral"] += sb.get("neutral", 0)
+        totals["sentiment_breakdown"]["negative"] += sb.get("negative", 0)
+
+    total_msgs = totals["total_messages"]
+    totals["avg_response_time_ms"] = round(rt_sum / rt_count) if rt_count > 0 else 0
+    totals["ai_handled_pct"] = round(
+        ((total_msgs - totals["total_escalations"]) / total_msgs * 100) if total_msgs > 0 else 0,
+        1,
+    )
+    totals["messages_by_day"] = sorted(totals["messages_by_day"].values(), key=lambda x: x["date"])
+
+    return totals
+
+
+@router.get("/activity")
+async def get_activity_feed(
+    limit: int = Query(20, le=100),
+    admin: Admin = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Recent platform events: new shops, handoffs."""
+    events = []
+
+    # Recent shops created
+    shops_result = await db.execute(
+        select(Shop).order_by(Shop.created_at.desc()).limit(limit)
+    )
+    for s in shops_result.scalars():
+        events.append({
+            "type": "shop_created",
+            "timestamp": s.created_at.isoformat() if s.created_at else "",
+            "shop_id": str(s.id),
+            "shop_name": s.name,
+            "detail": f"New shop onboarded: {s.name}",
+        })
+
+    # Recent handoffs
+    handoff_result = await db.execute(
+        select(HandoffRequest, Conversation, Shop)
+        .join(Conversation, HandoffRequest.conversation_id == Conversation.id)
+        .join(Shop, Conversation.shop_id == Shop.id)
+        .order_by(HandoffRequest.created_at.desc())
+        .limit(limit)
+    )
+    for h, c, s in handoff_result.all():
+        events.append({
+            "type": "handoff_triggered",
+            "timestamp": h.created_at.isoformat() if h.created_at else "",
+            "shop_id": str(s.id),
+            "shop_name": s.name,
+            "detail": h.reason or "Handoff triggered",
+        })
+
+    # Sort by timestamp desc and limit
+    events.sort(key=lambda e: e["timestamp"], reverse=True)
+    return events[:limit]

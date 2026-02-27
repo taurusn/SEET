@@ -4,7 +4,7 @@ import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
-import { Search } from "lucide-react";
+import { Search, ArrowUp, ArrowDown } from "lucide-react";
 
 interface ShopItem {
   id: string;
@@ -23,8 +23,19 @@ export default function ShopsPage() {
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [loading, setLoading] = useState(true);
+  const [sortBy, setSortBy] = useState<string>("created");
+  const [sortDir, setSortDir] = useState<string>("desc");
   const router = useRouter();
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
+
+  function toggleSort(col: string) {
+    if (sortBy === col) {
+      setSortDir(sortDir === "desc" ? "asc" : "desc");
+    } else {
+      setSortBy(col);
+      setSortDir("desc");
+    }
+  }
 
   // Debounce search input by 300ms
   useEffect(() => {
@@ -37,12 +48,15 @@ export default function ShopsPage() {
 
   useEffect(() => {
     setLoading(true);
-    const params = debouncedSearch ? `?search=${encodeURIComponent(debouncedSearch)}` : "";
+    const params = new URLSearchParams();
+    if (debouncedSearch) params.set("search", debouncedSearch);
+    params.set("sort_by", sortBy);
+    params.set("sort_dir", sortDir);
     api
-      .get<ShopItem[]>(`/api/v1/admin/shops${params}`)
+      .get<ShopItem[]>(`/api/v1/admin/shops?${params}`)
       .then(setShops)
       .finally(() => setLoading(false));
-  }, [debouncedSearch]);
+  }, [debouncedSearch, sortBy, sortDir]);
 
   return (
     <div>
@@ -79,8 +93,14 @@ export default function ShopsPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border bg-muted/30">
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground">
-                  Shop
+                <th
+                  className="text-left px-4 py-3 font-medium text-muted-foreground cursor-pointer hover:text-foreground select-none"
+                  onClick={() => toggleSort("name")}
+                >
+                  <span className="flex items-center gap-1">
+                    Shop
+                    {sortBy === "name" && (sortDir === "asc" ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />)}
+                  </span>
                 </th>
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">
                   Platforms
@@ -88,11 +108,23 @@ export default function ShopsPage() {
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">
                   Status
                 </th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground">
-                  Conversations
+                <th
+                  className="text-left px-4 py-3 font-medium text-muted-foreground cursor-pointer hover:text-foreground select-none"
+                  onClick={() => toggleSort("conversations")}
+                >
+                  <span className="flex items-center gap-1">
+                    Conversations
+                    {sortBy === "conversations" && (sortDir === "asc" ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />)}
+                  </span>
                 </th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground">
-                  Created
+                <th
+                  className="text-left px-4 py-3 font-medium text-muted-foreground cursor-pointer hover:text-foreground select-none"
+                  onClick={() => toggleSort("created")}
+                >
+                  <span className="flex items-center gap-1">
+                    Created
+                    {sortBy === "created" && (sortDir === "asc" ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />)}
+                  </span>
                 </th>
               </tr>
             </thead>
