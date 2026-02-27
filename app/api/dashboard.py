@@ -392,11 +392,14 @@ async def close_conversation(
 
     await db.flush()
 
-    await redis_client.publish_event(str(shop_id), {
-        "type": "conversation_updated",
-        "conversation_id": str(conversation_id),
-        "new_status": "closed",
-    })
+    try:
+        await redis_client.publish_event(str(shop_id), {
+            "type": "conversation_updated",
+            "conversation_id": str(conversation_id),
+            "new_status": "closed",
+        })
+    except Exception:
+        pass  # SSE notification is best-effort; DB changes are already flushed
 
     return {"status": "closed", "conversation_id": str(conversation_id)}
 

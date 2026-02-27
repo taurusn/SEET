@@ -32,17 +32,24 @@ def messages_to_csv(messages: list[dict]) -> str:
     """Convert messages to CSV format."""
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["timestamp", "direction", "sender_type", "content"])
+    has_convo_id = any("conversation_id" in m for m in messages[:1])
+    if has_convo_id:
+        writer.writerow(["conversation_id", "timestamp", "direction", "sender_type", "content"])
+    else:
+        writer.writerow(["timestamp", "direction", "sender_type", "content"])
     for msg in messages:
         ts = msg.get("created_at", "")
         if isinstance(ts, datetime):
             ts = ts.isoformat()
-        writer.writerow([
+        row = [
             ts,
             msg.get("direction", ""),
             msg.get("sender_type", ""),
             msg.get("content", ""),
-        ])
+        ]
+        if has_convo_id:
+            row.insert(0, msg.get("conversation_id", ""))
+        writer.writerow(row)
     return output.getvalue()
 
 
