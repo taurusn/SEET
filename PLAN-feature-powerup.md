@@ -37,9 +37,9 @@ Phase 0 (Architecture — build first):
   F0: Agentic AI Pipeline     [M]  ✅ DONE  ← see PLAN-agentic-pipeline.md
 
 Phase 1 (Features on new pipeline):
-  F1: AI Sales Mode              [S]  ← conditional prompt module in pipeline
-  F6: Business Hours Auto-reply  [S]  ← pre-processor short-circuit
-  F3+F7: Customer Recognition    [M]  ← pipeline stages, not prompt
+  F1: AI Sales Mode              [S]  ✅ DONE
+  F6: Business Hours Auto-reply  [S]  ✅ DONE
+  F3+F7: Customer Recognition    [M]  ✅ DONE
          + Sentiment Tracking
 
 Phase 2 (Requires Phase 1):

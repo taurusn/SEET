@@ -21,6 +21,7 @@ const contextTypeLabels: Record<string, string> = {
   hours: "ساعات العمل",
   faq: "الأسئلة الشائعة",
   tone: "أسلوب الرد",
+  sales: "المبيعات والتوصيات",
 };
 
 const contextTypePlaceholders: Record<string, string> = {
@@ -28,6 +29,7 @@ const contextTypePlaceholders: Record<string, string> = {
   hours: "السبت-الخميس: ٧ ص - ١١ م\nالجمعة: ٢ م - ١١ م",
   faq: "س: عندكم توصيل؟\nج: ايه نوصل عن طريق جاهز ومرسول",
   tone: "ودود وعفوي بلهجة سعودية نجدية",
+  sales: "إذا العميل طلب قهوة، نوّه عن الخلطة الجديدة بـ45 ريال\nدايم اقترح معجنات مع أي مشروب",
 };
 
 export function ContextEditor({ contexts, onUpdate }: ContextEditorProps) {

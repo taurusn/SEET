@@ -81,6 +81,7 @@ class Conversation(Base):
     platform = Column(String(20), nullable=False)  # 'instagram', 'whatsapp'
     customer_id = Column(String(255), nullable=False)
     status = Column(String(20), default="ai")  # 'ai', 'human', 'closed'
+    sentiment = Column(String(20), nullable=True)  # 'positive', 'neutral', 'negative'
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
@@ -90,6 +91,26 @@ class Conversation(Base):
     shop = relationship("Shop", back_populates="conversations")
     messages = relationship("Message", back_populates="conversation", lazy="select")
     handoff_requests = relationship("HandoffRequest", back_populates="conversation", lazy="select")
+
+
+class CustomerProfile(Base):
+    __tablename__ = "customer_profiles"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    shop_id = Column(UUID(as_uuid=True), ForeignKey("shops.id"), nullable=False)
+    platform = Column(String(20), nullable=False)
+    customer_id = Column(String(255), nullable=False)
+    display_name = Column(String(255), nullable=True)
+    notes = Column(Text, nullable=True)
+    total_conversations = Column(Integer, default=1)
+    first_seen_at = Column(DateTime(timezone=True), server_default=func.now())
+    last_seen_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("shop_id", "platform", "customer_id", name="uq_customer_profile"),
+    )
+
+    shop = relationship("Shop", backref="customer_profiles")
 
 
 class Message(Base):
@@ -250,6 +271,7 @@ class ConversationResponse(BaseModel):
     platform: str
     customer_id: str
     status: str
+    sentiment: Optional[str] = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -445,5 +467,29 @@ class AdminShopResponse(BaseModel):
     created_at: datetime
     total_conversations: int = 0
     active_handoffs: int = 0
+
+    model_config = {"from_attributes": True}
+
+
+# ─── Customer Profile Schemas ──────────────────────────────────────────────
+
+
+class CustomerProfileResponse(BaseModel):
+    id: uuid.UUID
+    shop_id: uuid.UUID
+    platform: str
+    customer_id: str
+    display_name: Optional[str] = None
+    notes: Optional[str] = None
+    total_conversations: int
+    first_seen_at: datetime
+    last_seen_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class CustomerProfileUpdate(BaseModel):
+    display_name: Optional[str] = None
+    notes: Optional[str] = None
 
     model_config = {"from_attributes": True}
