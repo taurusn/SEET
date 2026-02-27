@@ -89,7 +89,7 @@ async def get_current_admin(
     """Dependency: extract admin from JWT and verify they exist + are active."""
     token_data = decode_admin_token(credentials.credentials)
 
-    if token_data.role != "admin" and token_data.role != "superadmin":
+    if token_data.role not in ("admin", "superadmin", "viewer"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not an admin token",
@@ -110,3 +110,15 @@ async def get_current_admin(
             detail="Admin account is deactivated",
         )
     return admin
+
+
+def require_role(*allowed_roles: str):
+    """Dependency factory: checks the admin has one of the allowed roles."""
+    async def _check(admin: Admin = Depends(get_current_admin)):
+        if admin.role not in allowed_roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Insufficient permissions",
+            )
+        return admin
+    return _check

@@ -122,6 +122,9 @@ export default function SettingsPage() {
                 }
                 className="w-full px-4 py-2.5 rounded-xl border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
               />
+              <p className="text-xs text-muted-foreground mt-1.5">
+                تغيير اسم المحل سيغير بيانات الدخول
+              </p>
             </div>
 
             {/* Platform connections */}

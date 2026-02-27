@@ -299,6 +299,47 @@ async def owner_reply(
     return outbound_msg
 
 
+@router.post("/shop/conversations/{conversation_id}/close")
+async def close_conversation(
+    conversation_id: uuid.UUID,
+    shop_id: uuid.UUID = Depends(get_current_shop_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Manually close a conversation."""
+    stmt = select(Conversation).where(
+        Conversation.id == conversation_id,
+        Conversation.shop_id == shop_id,
+    )
+    result = await db.execute(stmt)
+    convo = result.scalar_one_or_none()
+    if not convo:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    if convo.status == "closed":
+        raise HTTPException(status_code=400, detail="Conversation is already closed")
+
+    convo.status = "closed"
+
+    # Auto-resolve any open handoff for this conversation
+    open_handoff = await db.execute(
+        select(HandoffRequest).where(
+            HandoffRequest.conversation_id == conversation_id,
+            HandoffRequest.resolved_at.is_(None),
+        )
+    )
+    for h in open_handoff.scalars():
+        h.resolved_at = datetime.now(timezone.utc)
+
+    await db.flush()
+
+    await redis_client.publish_event(str(shop_id), {
+        "type": "conversation_updated",
+        "conversation_id": str(conversation_id),
+        "new_status": "closed",
+    })
+
+    return {"status": "closed", "conversation_id": str(conversation_id)}
+
+
 # ─── Handoff Management ──────────────────────────────────────────────────────
 
 

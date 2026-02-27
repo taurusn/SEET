@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { api } from "@/lib/api";
 import { cn, timeAgo } from "@/lib/utils";
-import { Bot, User, MessageSquare, UserCheck, Send } from "lucide-react";
+import { Bot, User, MessageSquare, UserCheck, Send, XCircle } from "lucide-react";
 
 interface Message {
   id: string;
