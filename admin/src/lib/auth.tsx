@@ -45,7 +45,19 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
     if (token && adminStr) {
       try {
         const admin = JSON.parse(adminStr);
-        setState({ token, admin, loading: false });
+        // Validate token is not expired by calling /me
+        api
+          .get<AdminUser>("/api/v1/admin/me")
+          .then((freshAdmin) => {
+            localStorage.setItem("admin", JSON.stringify(freshAdmin));
+            setState({ token, admin: freshAdmin, loading: false });
+          })
+          .catch(() => {
+            // Token expired or invalid — clear everything
+            localStorage.removeItem("admin_token");
+            localStorage.removeItem("admin");
+            setState({ token: null, admin: null, loading: false });
+          });
       } catch {
         localStorage.removeItem("admin_token");
         localStorage.removeItem("admin");
@@ -63,11 +75,18 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
       name: string;
     }>("/api/v1/admin/login", { email, password });
 
+    // Save token first so api.get picks it up from localStorage
     localStorage.setItem("admin_token", res.access_token);
 
-    const admin = await api.get<AdminUser>("/api/v1/admin/me");
-    localStorage.setItem("admin", JSON.stringify(admin));
-    setState({ token: res.access_token, admin, loading: false });
+    try {
+      const admin = await api.get<AdminUser>("/api/v1/admin/me");
+      localStorage.setItem("admin", JSON.stringify(admin));
+      setState({ token: res.access_token, admin, loading: false });
+    } catch {
+      // /me failed — rollback the token so we don't leave orphaned state
+      localStorage.removeItem("admin_token");
+      throw new Error("Login succeeded but failed to fetch profile");
+    }
   };
 
   const logout = () => {

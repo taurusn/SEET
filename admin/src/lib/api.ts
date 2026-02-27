@@ -30,7 +30,7 @@ class ApiClient {
     });
 
     if (res.status === 401) {
-      if (typeof window !== "undefined") {
+      if (typeof window !== "undefined" && !window.location.pathname.endsWith("/login")) {
         localStorage.removeItem("admin_token");
         localStorage.removeItem("admin");
         window.location.href = "/admin/login";

@@ -56,8 +56,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     if (token && shopStr) {
       try {
-        const shop = JSON.parse(shopStr);
-        setState({ token, shop, loading: false });
+        JSON.parse(shopStr); // validate JSON
+        // Validate token by fetching fresh shop data
+        api
+          .get<Shop>("/api/v1/shop")
+          .then((freshShop) => {
+            localStorage.setItem("shop", JSON.stringify(freshShop));
+            setState({ token, shop: freshShop, loading: false });
+          })
+          .catch(() => {
+            localStorage.removeItem("token");
+            localStorage.removeItem("shop");
+            setState({ token: null, shop: null, loading: false });
+          });
       } catch {
         localStorage.removeItem("token");
         localStorage.removeItem("shop");
@@ -70,9 +81,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = async (shopId: string, token: string) => {
     localStorage.setItem("token", token);
-    const shop = await api.get<Shop>("/api/v1/shop");
-    localStorage.setItem("shop", JSON.stringify(shop));
-    setState({ token, shop, loading: false });
+    try {
+      const shop = await api.get<Shop>("/api/v1/shop");
+      localStorage.setItem("shop", JSON.stringify(shop));
+      setState({ token, shop, loading: false });
+    } catch {
+      localStorage.removeItem("token");
+      throw new Error("Login succeeded but failed to fetch shop profile");
+    }
   };
 
   const register = async (data: {
