@@ -88,7 +88,7 @@ export default function ShopsPage() {
               {shops.map((shop) => (
                 <tr
                   key={shop.id}
-                  onClick={() => router.push(`/admin/shops/${shop.id}`)}
+                  onClick={() => router.push(`/shops/${shop.id}`)}
                   className="border-b border-border last:border-0 hover:bg-muted/20 cursor-pointer transition-colors"
                 >
                   <td className="px-4 py-3">
