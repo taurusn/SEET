@@ -41,8 +41,24 @@ class Shop(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
+    logo_url = Column(String(500), nullable=True)
+    brand_color = Column(String(7), nullable=True)
+    splash_text = Column(String(255), nullable=True)
+
     contexts = relationship("ShopContext", back_populates="shop", lazy="select")
     conversations = relationship("Conversation", back_populates="shop", lazy="select")
+
+
+class Admin(Base):
+    __tablename__ = "admins"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    email = Column(String(255), unique=True, nullable=False)
+    password_hash = Column(Text, nullable=False)
+    name = Column(String(255), nullable=False)
+    role = Column(String(50), default="admin")
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
 class ShopContext(Base):
@@ -193,6 +209,9 @@ class ShopUpdate(BaseModel):
     wa_waba_id: Optional[str] = None
     wa_access_token: Optional[str] = None
     is_active: Optional[bool] = None
+    logo_url: Optional[str] = None
+    brand_color: Optional[str] = None
+    splash_text: Optional[str] = None
 
 
 class ShopResponse(BaseModel):
@@ -202,6 +221,9 @@ class ShopResponse(BaseModel):
     wa_phone_number_id: Optional[str] = None
     wa_waba_id: Optional[str] = None
     is_active: bool
+    logo_url: Optional[str] = None
+    brand_color: Optional[str] = None
+    splash_text: Optional[str] = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -363,3 +385,65 @@ class PlaygroundChatResponse(BaseModel):
 
 class OwnerReplyRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=2000)
+
+
+# ─── Admin Schemas ──────────────────────────────────────────────────────────
+
+
+class AdminCreate(BaseModel):
+    email: str
+    password: str = Field(..., min_length=8)
+    name: str
+
+
+class AdminLogin(BaseModel):
+    email: str
+    password: str
+
+
+class AdminTokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    admin_id: str
+    name: str
+    expires_at: datetime
+
+
+class AdminResponse(BaseModel):
+    id: uuid.UUID
+    email: str
+    name: str
+    role: str
+    is_active: bool
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class AdminShopCreate(BaseModel):
+    name: str
+    ig_page_id: Optional[str] = None
+    ig_access_token: Optional[str] = None
+    wa_phone_number_id: Optional[str] = None
+    wa_waba_id: Optional[str] = None
+    wa_access_token: Optional[str] = None
+    logo_url: Optional[str] = None
+    brand_color: Optional[str] = None
+    splash_text: Optional[str] = None
+
+
+class AdminShopResponse(BaseModel):
+    id: uuid.UUID
+    name: str
+    ig_page_id: Optional[str] = None
+    wa_phone_number_id: Optional[str] = None
+    wa_waba_id: Optional[str] = None
+    is_active: bool
+    logo_url: Optional[str] = None
+    brand_color: Optional[str] = None
+    splash_text: Optional[str] = None
+    created_at: datetime
+    total_conversations: int = 0
+    active_handoffs: int = 0
+
+    model_config = {"from_attributes": True}

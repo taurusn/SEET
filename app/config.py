@@ -29,6 +29,14 @@ class Settings(BaseSettings):
 
     # Frontend
     frontend_url: str = "http://localhost:3000"
+    admin_frontend_url: str = "http://localhost:3001"
+
+    # MinIO (S3-compatible object storage)
+    minio_endpoint: str = "minio:9000"
+    minio_access_key: str = "seet-admin"
+    minio_secret_key: str = "seet-secret-change-me"
+    minio_bucket: str = "seet-assets"
+    minio_public_url: str = "/assets"
 
     # App
     app_env: str = "development"

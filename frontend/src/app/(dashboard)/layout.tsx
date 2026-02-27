@@ -2,8 +2,9 @@
 
 import { useAuth } from "@/lib/auth";
 import { useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Dock } from "@/components/sidebar";
+import { SplashScreen } from "@/components/splash-screen";
 import Image from "next/image";
 
 export default function DashboardLayout({
@@ -13,12 +14,25 @@ export default function DashboardLayout({
 }) {
   const { token, shop, loading } = useAuth();
   const router = useRouter();
+  const [showSplash, setShowSplash] = useState(false);
 
   useEffect(() => {
     if (!loading && !token) {
       router.push("/login");
     }
   }, [token, loading, router]);
+
+  useEffect(() => {
+    if (!loading && token && shop) {
+      const splashKey = `splash_shown_${shop.id}`;
+      if (!sessionStorage.getItem(splashKey)) {
+        setShowSplash(true);
+        sessionStorage.setItem(splashKey, "1");
+      }
+    }
+  }, [loading, token, shop]);
+
+  const handleSplashDone = useCallback(() => setShowSplash(false), []);
 
   if (loading) {
     return (
@@ -32,6 +46,15 @@ export default function DashboardLayout({
 
   return (
     <div className="min-h-screen">
+      {showSplash && shop && (
+        <SplashScreen
+          logoUrl={shop.logo_url}
+          brandColor={shop.brand_color}
+          splashText={shop.splash_text}
+          onDone={handleSplashDone}
+        />
+      )}
+
       {/* Top bar */}
       <header className="sticky top-0 z-40 bg-background/80 backdrop-blur-md border-b border-border/50">
         <div className="max-w-7xl mx-auto px-6 md:px-8 h-14 flex items-center justify-between">
