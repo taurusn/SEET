@@ -40,7 +40,7 @@ export default function ConversationsPage() {
     if (filter.platform) params.set("platform", filter.platform);
     if (filter.status) params.set("status", filter.status);
 
-    api
+    return api
       .get<Conversation[]>(`/api/v1/shop/conversations?${params}`)
       .then((data) => {
         setConversations(data);
@@ -52,8 +52,7 @@ export default function ConversationsPage() {
 
   useEffect(() => {
     setLoading(true);
-    fetchConversations();
-    setLoading(false);
+    fetchConversations().finally(() => setLoading(false));
   }, [fetchConversations]);
 
   // Listen for SSE events dispatched from layout
