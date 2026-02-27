@@ -142,7 +142,7 @@ export default function ShopDetailPage() {
   return (
     <div>
       <button
-        onClick={() => router.push("/admin/shops")}
+        onClick={() => router.push("/shops")}
         className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground mb-4"
       >
         <ArrowLeft size={16} /> Back to shops

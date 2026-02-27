@@ -13,10 +13,10 @@ import {
 } from "lucide-react";
 
 const navItems = [
-  { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/admin/shops", label: "Shops", icon: Store },
-  { href: "/admin/shops/onboard", label: "New Shop", icon: PlusCircle },
-  { href: "/admin/settings", label: "Settings", icon: Settings },
+  { href: "/", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/shops", label: "Shops", icon: Store },
+  { href: "/shops/onboard", label: "New Shop", icon: PlusCircle },
+  { href: "/settings", label: "Settings", icon: Settings },
 ];
 
 export function AdminSidebar() {
@@ -36,10 +36,11 @@ export function AdminSidebar() {
 
       <nav className="flex-1 p-3 space-y-1">
         {navItems.map((item) => {
+          const fullPath = `/admin${item.href === "/" ? "" : item.href}`;
           const isActive =
-            item.href === "/admin"
-              ? pathname === "/admin"
-              : pathname.startsWith(item.href);
+            item.href === "/"
+              ? pathname === "/admin" || pathname === "/admin/"
+              : pathname.startsWith(fullPath);
 
           return (
             <Link
