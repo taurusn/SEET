@@ -100,7 +100,7 @@ export default function AnalyticsPage() {
             <div className="bg-card rounded-2xl border border-border p-5 shadow-sm">
               <div className="flex items-center gap-2 mb-3">
                 <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center">
-                  <Bot className="w-4.5 h-4.5 text-primary" />
+                  <Bot className="w-5 h-5 text-primary" />
                 </div>
               </div>
               <p className="text-2xl font-bold">{data.ai_handled_pct}%</p>
@@ -112,7 +112,7 @@ export default function AnalyticsPage() {
             <div className="bg-card rounded-2xl border border-border p-5 shadow-sm">
               <div className="flex items-center gap-2 mb-3">
                 <div className="w-9 h-9 rounded-xl bg-success/10 flex items-center justify-center">
-                  <Clock className="w-4.5 h-4.5 text-success" />
+                  <Clock className="w-5 h-5 text-success" />
                 </div>
               </div>
               <p className="text-2xl font-bold">
@@ -126,7 +126,7 @@ export default function AnalyticsPage() {
             <div className="bg-card rounded-2xl border border-border p-5 shadow-sm">
               <div className="flex items-center gap-2 mb-3">
                 <div className="w-9 h-9 rounded-xl bg-muted flex items-center justify-center">
-                  <MessageSquare className="w-4.5 h-4.5 text-muted-foreground" />
+                  <MessageSquare className="w-5 h-5 text-muted-foreground" />
                 </div>
               </div>
               <p className="text-2xl font-bold">{data.total_messages}</p>
@@ -138,7 +138,7 @@ export default function AnalyticsPage() {
             <div className="bg-card rounded-2xl border border-border p-5 shadow-sm">
               <div className="flex items-center gap-2 mb-3">
                 <div className="w-9 h-9 rounded-xl bg-warning/10 flex items-center justify-center">
-                  <ArrowUpRight className="w-4.5 h-4.5 text-warning" />
+                  <ArrowUpRight className="w-5 h-5 text-warning" />
                 </div>
               </div>
               <p className="text-2xl font-bold">{data.total_escalations}</p>
