@@ -26,6 +26,7 @@ export default function OnboardPage() {
   >([]);
   const [newCtx, setNewCtx] = useState({ context_type: "menu", content: "" });
   const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [error, setError] = useState("");
 
   const addContext = () => {
     if (!newCtx.content.trim()) return;
@@ -39,6 +40,7 @@ export default function OnboardPage() {
 
   const handleSubmit = async () => {
     setSaving(true);
+    setError("");
     try {
       const shopData: Record<string, string> = { name: form.name };
       if (form.brand_color) shopData.brand_color = form.brand_color;
@@ -54,19 +56,29 @@ export default function OnboardPage() {
 
       const shop = await api.post<{ id: string }>("/api/v1/admin/shops", shopData);
 
-      // Upload logo
+      // Upload logo (non-blocking — shop already created)
       if (logoFile) {
-        const fd = new FormData();
-        fd.append("file", logoFile);
-        await api.upload(`/api/v1/admin/shops/${shop.id}/logo`, fd);
+        try {
+          const fd = new FormData();
+          fd.append("file", logoFile);
+          await api.upload(`/api/v1/admin/shops/${shop.id}/logo`, fd);
+        } catch {
+          // Logo upload failed but shop was created — continue
+        }
       }
 
       // Add context items
       for (const ctx of contexts) {
-        await api.post(`/api/v1/admin/shops/${shop.id}/context`, ctx);
+        try {
+          await api.post(`/api/v1/admin/shops/${shop.id}/context`, ctx);
+        } catch {
+          // Context failed but shop was created — continue
+        }
       }
 
       router.push(`/shops/${shop.id}`);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to create shop");
     } finally {
       setSaving(false);
     }
@@ -330,6 +342,12 @@ export default function OnboardPage() {
               <strong>Context items:</strong> {contexts.length}
             </p>
           </div>
+        </div>
+      )}
+
+      {error && (
+        <div className="mt-4 px-4 py-2 rounded-lg bg-danger/10 text-danger text-sm">
+          {error}
         </div>
       )}
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
@@ -21,16 +21,28 @@ interface ShopItem {
 export default function ShopsPage() {
   const [shops, setShops] = useState<ShopItem[]>([]);
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const router = useRouter();
+  const debounceRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Debounce search input by 300ms
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [search]);
 
   useEffect(() => {
-    const params = search ? `?search=${encodeURIComponent(search)}` : "";
+    setLoading(true);
+    const params = debouncedSearch ? `?search=${encodeURIComponent(debouncedSearch)}` : "";
     api
       .get<ShopItem[]>(`/api/v1/admin/shops${params}`)
       .then(setShops)
       .finally(() => setLoading(false));
-  }, [search]);
+  }, [debouncedSearch]);
 
   return (
     <div>

@@ -105,8 +105,25 @@ async def list_all_shops(
     admin: Admin = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """List all shops with basic stats."""
-    stmt = select(Shop)
+    """List all shops with basic stats (single query with subqueries)."""
+    convo_sub = (
+        select(func.count())
+        .where(Conversation.shop_id == Shop.id)
+        .correlate(Shop)
+        .scalar_subquery()
+    )
+    handoff_sub = (
+        select(func.count())
+        .where(
+            HandoffRequest.conversation_id == Conversation.id,
+            Conversation.shop_id == Shop.id,
+            HandoffRequest.resolved_at.is_(None),
+        )
+        .correlate(Shop)
+        .scalar_subquery()
+    )
+
+    stmt = select(Shop, convo_sub.label("convo_count"), handoff_sub.label("handoff_count"))
     if search:
         stmt = stmt.where(Shop.name.ilike(f"%{search}%"))
     if is_active is not None:
@@ -114,36 +131,25 @@ async def list_all_shops(
     stmt = stmt.order_by(Shop.created_at.desc()).limit(limit).offset(offset)
 
     result = await db.execute(stmt)
-    shops = result.scalars().all()
+    rows = result.all()
 
-    response = []
-    for shop in shops:
-        convo_count = await db.execute(
-            select(func.count()).select_from(Conversation).where(Conversation.shop_id == shop.id)
+    return [
+        AdminShopResponse(
+            id=shop.id,
+            name=shop.name,
+            ig_page_id=shop.ig_page_id,
+            wa_phone_number_id=shop.wa_phone_number_id,
+            wa_waba_id=shop.wa_waba_id,
+            is_active=shop.is_active,
+            logo_url=shop.logo_url,
+            brand_color=shop.brand_color,
+            splash_text=shop.splash_text,
+            created_at=shop.created_at,
+            total_conversations=convo_count or 0,
+            active_handoffs=handoff_count or 0,
         )
-        handoff_count = await db.execute(
-            select(func.count())
-            .select_from(HandoffRequest)
-            .join(Conversation)
-            .where(Conversation.shop_id == shop.id, HandoffRequest.resolved_at.is_(None))
-        )
-        response.append(
-            AdminShopResponse(
-                id=shop.id,
-                name=shop.name,
-                ig_page_id=shop.ig_page_id,
-                wa_phone_number_id=shop.wa_phone_number_id,
-                wa_waba_id=shop.wa_waba_id,
-                is_active=shop.is_active,
-                logo_url=shop.logo_url,
-                brand_color=shop.brand_color,
-                splash_text=shop.splash_text,
-                created_at=shop.created_at,
-                total_conversations=convo_count.scalar() or 0,
-                active_handoffs=handoff_count.scalar() or 0,
-            )
-        )
-    return response
+        for shop, convo_count, handoff_count in rows
+    ]
 
 
 @router.post("/shops", response_model=ShopResponse, status_code=201)
