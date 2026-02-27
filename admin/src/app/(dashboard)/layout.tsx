@@ -15,7 +15,7 @@ export default function DashboardLayout({
 
   useEffect(() => {
     if (!loading && !token) {
-      router.push("/admin/login");
+      router.push("/login");
     }
   }, [token, loading, router]);
 

@@ -37,7 +37,7 @@ export default function ShopsPage() {
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold">Shops</h1>
         <button
-          onClick={() => router.push("/admin/shops/onboard")}
+          onClick={() => router.push("/shops/onboard")}
           className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition-opacity"
         >
           + New Shop

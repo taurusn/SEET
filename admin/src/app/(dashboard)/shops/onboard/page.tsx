@@ -66,7 +66,7 @@ export default function OnboardPage() {
         await api.post(`/api/v1/admin/shops/${shop.id}/context`, ctx);
       }
 
-      router.push(`/admin/shops/${shop.id}`);
+      router.push(`/shops/${shop.id}`);
     } finally {
       setSaving(false);
     }
