@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { StatsCard } from "@/components/stats-card";
-import { MessageSquare, Users, Bell, Ticket } from "lucide-react";
+import { MessageSquare, Users, Bell, Ticket, Bot, Clock } from "lucide-react";
 import Link from "next/link";
 import { timeAgo } from "@/lib/utils";
 
@@ -12,6 +12,12 @@ interface Stats {
   total_messages: number;
   active_handoffs: number;
   active_vouchers: number;
+}
+
+interface MiniAnalytics {
+  ai_handled_pct: number;
+  avg_response_time_ms: number;
+  total_messages: number;
 }
 
 interface Conversation {
@@ -25,12 +31,17 @@ interface Conversation {
 export default function DashboardPage() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [recent, setRecent] = useState<Conversation[]>([]);
+  const [analytics, setAnalytics] = useState<MiniAnalytics | null>(null);
 
   useEffect(() => {
     api.get<Stats>("/api/v1/shop/stats").then(setStats);
     api
       .get<Conversation[]>("/api/v1/shop/conversations?limit=5")
       .then(setRecent);
+    api
+      .get<MiniAnalytics>("/api/v1/shop/analytics?period=7d")
+      .then(setAnalytics)
+      .catch(() => {});
   }, []);
 
   return (
@@ -76,6 +87,35 @@ export default function DashboardPage() {
             <p className="font-medium">
               {stats.active_handoffs} عملاء ينتظرون رد بشري
             </p>
+          </div>
+        </Link>
+      )}
+
+      {/* AI Performance mini summary */}
+      {analytics && analytics.total_messages > 0 && (
+        <Link
+          href="/analytics"
+          className="block mb-6 p-4 rounded-2xl bg-card border border-border shadow-sm hover:border-primary/30 transition-colors"
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <Bot className="w-4 h-4 text-primary" />
+                <span className="text-sm font-medium">
+                  {analytics.ai_handled_pct}% تعامل الذكاء الاصطناعي
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Clock className="w-4 h-4 text-success" />
+                <span className="text-sm font-medium">
+                  {analytics.avg_response_time_ms < 1000
+                    ? `${analytics.avg_response_time_ms}ms`
+                    : `${(analytics.avg_response_time_ms / 1000).toFixed(1)}s`}{" "}
+                  متوسط الرد
+                </span>
+              </div>
+            </div>
+            <span className="text-xs text-muted-foreground">آخر ٧ أيام →</span>
           </div>
         </Link>
       )}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { ConversationList } from "@/components/conversation-list";
 import { ConversationThread } from "@/components/conversation-thread";
@@ -22,8 +23,9 @@ interface CustomerProfile {
 }
 
 export default function ConversationsPage() {
+  const searchParams = useSearchParams();
   const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(searchParams.get("id"));
   const [customerProfile, setCustomerProfile] = useState<CustomerProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState({ platform: "", status: "" });
@@ -128,7 +130,10 @@ export default function ConversationsPage() {
                     : "واتساب"}
                 </p>
               </div>
-              <ConversationThread conversationId={selectedId} />
+              <ConversationThread
+                conversationId={selectedId}
+                conversationStatus={conversations.find((c) => c.id === selectedId)?.status}
+              />
             </div>
           ) : (
             <div className="flex flex-col items-center justify-center py-24 text-muted-foreground">

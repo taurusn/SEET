@@ -1,7 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { timeAgo } from "@/lib/utils";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, MessageSquare } from "lucide-react";
 
 interface HandoffRequest {
   id: string;
@@ -46,6 +47,13 @@ export function HandoffCard({
             </p>
           )}
           <div className="flex gap-2">
+            <Link
+              href={`/conversations?id=${handoff.conversation_id}`}
+              className="px-3 py-1.5 text-xs font-medium rounded-lg bg-muted text-foreground hover:bg-muted/80 transition-colors flex items-center gap-1"
+            >
+              <MessageSquare className="w-3 h-3" />
+              عرض المحادثة
+            </Link>
             <button
               onClick={() => onResolve(handoff.id)}
               disabled={resolving}

@@ -1,5 +1,6 @@
 import json
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import redis.asyncio as redis
@@ -171,6 +172,119 @@ class RedisClient:
     async def invalidate_shop_context(self, shop_id: str) -> None:
         key = f"shop:{shop_id}:context"
         await self.client.delete(key)
+
+    # ─── Analytics Tracking ─────────────────────────────────────────────
+
+    ANALYTICS_TTL = 35 * 86400  # 35 days — ~1 month of data
+
+    async def track_message_processed(
+        self,
+        shop_id: str,
+        response_time_ms: int,
+        was_escalated: bool,
+        sentiment: str,
+        hour: int,
+    ) -> None:
+        """Track a processed message for analytics.
+
+        Uses Redis pipeline for atomic batch writes (single round-trip).
+        Keys are per shop per day with 35-day TTL.
+        """
+        date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        prefix = f"analytics:{shop_id}:{date_str}"
+
+        pipe = self.client.pipeline()
+        pipe.incr(f"{prefix}:messages")
+        pipe.expire(f"{prefix}:messages", self.ANALYTICS_TTL)
+
+        if was_escalated:
+            pipe.incr(f"{prefix}:escalations")
+            pipe.expire(f"{prefix}:escalations", self.ANALYTICS_TTL)
+
+        pipe.incrby(f"{prefix}:rt_sum", response_time_ms)
+        pipe.expire(f"{prefix}:rt_sum", self.ANALYTICS_TTL)
+        pipe.incr(f"{prefix}:rt_count")
+        pipe.expire(f"{prefix}:rt_count", self.ANALYTICS_TTL)
+
+        pipe.incr(f"{prefix}:hourly:{hour}")
+        pipe.expire(f"{prefix}:hourly:{hour}", self.ANALYTICS_TTL)
+
+        if sentiment in ("positive", "neutral", "negative"):
+            pipe.incr(f"{prefix}:sentiment:{sentiment}")
+            pipe.expire(f"{prefix}:sentiment:{sentiment}", self.ANALYTICS_TTL)
+
+        await pipe.execute()
+
+    async def get_analytics(self, shop_id: str, days: int = 7) -> dict:
+        """Aggregate analytics over N days.
+
+        Returns: total_messages, total_escalations, ai_handled_pct,
+        avg_response_time_ms, messages_by_hour, messages_by_day,
+        sentiment_breakdown.
+        """
+        today = datetime.now(timezone.utc).date()
+        total_messages = 0
+        total_escalations = 0
+        rt_sum = 0
+        rt_count = 0
+        hourly = [0] * 24
+        daily: list[dict] = []
+        sentiment = {"positive": 0, "neutral": 0, "negative": 0}
+
+        for i in range(days):
+            date = today - timedelta(days=i)
+            date_str = date.strftime("%Y-%m-%d")
+            prefix = f"analytics:{shop_id}:{date_str}"
+
+            pipe = self.client.pipeline()
+            pipe.get(f"{prefix}:messages")
+            pipe.get(f"{prefix}:escalations")
+            pipe.get(f"{prefix}:rt_sum")
+            pipe.get(f"{prefix}:rt_count")
+            for h in range(24):
+                pipe.get(f"{prefix}:hourly:{h}")
+            pipe.get(f"{prefix}:sentiment:positive")
+            pipe.get(f"{prefix}:sentiment:neutral")
+            pipe.get(f"{prefix}:sentiment:negative")
+            results = await pipe.execute()
+
+            day_msgs = int(results[0] or 0)
+            day_esc = int(results[1] or 0)
+            day_rt_sum = int(results[2] or 0)
+            day_rt_count = int(results[3] or 0)
+
+            total_messages += day_msgs
+            total_escalations += day_esc
+            rt_sum += day_rt_sum
+            rt_count += day_rt_count
+
+            for h in range(24):
+                hourly[h] += int(results[4 + h] or 0)
+
+            sentiment["positive"] += int(results[28] or 0)
+            sentiment["neutral"] += int(results[29] or 0)
+            sentiment["negative"] += int(results[30] or 0)
+
+            daily.append({"date": date_str, "messages": day_msgs, "escalations": day_esc})
+
+        daily.reverse()  # chronological order
+
+        ai_handled_pct = (
+            round((total_messages - total_escalations) / total_messages * 100, 1)
+            if total_messages > 0
+            else 0
+        )
+        avg_rt = round(rt_sum / rt_count) if rt_count > 0 else 0
+
+        return {
+            "total_messages": total_messages,
+            "total_escalations": total_escalations,
+            "ai_handled_pct": ai_handled_pct,
+            "avg_response_time_ms": avg_rt,
+            "messages_by_hour": hourly,
+            "messages_by_day": daily,
+            "sentiment_breakdown": sentiment,
+        }
 
     async def close(self) -> None:
         if self._client:

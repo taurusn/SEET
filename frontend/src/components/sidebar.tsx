@@ -12,6 +12,7 @@ import {
   Settings,
   LogOut,
   FlaskConical,
+  BarChart3,
 } from "lucide-react";
 import { useRef, useState, useCallback, useEffect } from "react";
 import { api } from "@/lib/api";
@@ -21,6 +22,7 @@ const navItems = [
   { href: "/conversations", label: "المحادثات", icon: MessageSquare },
   { href: "/playground", label: "ملعب الذكاء", icon: FlaskConical },
   { href: "/handoffs", label: "التحويلات", icon: Bell },
+  { href: "/analytics", label: "التحليلات", icon: BarChart3 },
   { href: "/vouchers", label: "القسائم", icon: Ticket },
   { href: "/settings", label: "الإعدادات", icon: Settings },
 ];

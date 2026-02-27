@@ -43,8 +43,8 @@ Phase 1 (Features on new pipeline):
          + Sentiment Tracking
 
 Phase 2 (Requires Phase 1):
-  F2: Live Owner Reply           [S]  ← backend API already exists!
-  F5: Analytics Dashboard        [L]  ← reads from pipeline metrics
+  F2: Live Owner Reply           [S]  ✅ DONE
+  F5: Analytics Dashboard        [L]  ✅ DONE
 
 Phase 3 (Benefits from everything being in place):
   F4: Real-time + Notifications  [L]  ← SSE infrastructure, browser push
