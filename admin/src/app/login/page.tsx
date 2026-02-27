@@ -1,16 +1,34 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAdmin } from "@/lib/auth";
 import { useRouter } from "next/navigation";
 
 export default function LoginPage() {
-  const { login } = useAdmin();
+  const { login, token, loading: authLoading } = useAdmin();
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!authLoading && token) {
+      router.replace("/");
+    }
+  }, [authLoading, token, router]);
+
+  // Still checking auth — show spinner, not the form
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  // Already authenticated — useEffect will redirect, render nothing
+  if (token) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -18,7 +36,7 @@ export default function LoginPage() {
     setLoading(true);
     try {
       await login(email, password);
-      router.push("/");
+      router.replace("/");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
     } finally {
