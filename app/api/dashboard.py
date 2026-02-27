@@ -10,7 +10,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, func
+from fastapi.responses import StreamingResponse
+from sqlalchemy import select, func, exists as sa_exists
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.database import get_db
@@ -46,6 +47,7 @@ from app.models.schemas import (
 from app.services.encryption import encrypt_token
 from app.services.redis_client import redis_client
 from app.services.handoff import resolve_handoff, trigger_handoff
+from app.services.export import messages_to_transcript, messages_to_csv, analytics_to_csv
 from app.services.ai_pipeline import ai_pipeline
 from app.workers.message_worker import get_shop_context, get_recent_messages, save_message, HANDOFF_REPLY
 from app.services.voucher import generate_voucher_code, is_voucher_expired
@@ -195,6 +197,7 @@ async def delete_shop_context(
 async def list_conversations(
     status: Optional[str] = None,
     platform: Optional[str] = None,
+    search: Optional[str] = None,
     limit: int = Query(50, le=200),
     offset: int = 0,
     shop_id: uuid.UUID = Depends(get_current_shop_id),
@@ -205,6 +208,15 @@ async def list_conversations(
         stmt = stmt.where(Conversation.status == status)
     if platform:
         stmt = stmt.where(Conversation.platform == platform)
+    if search:
+        msg_match = (
+            sa_exists()
+            .where(Message.conversation_id == Conversation.id)
+            .where(Message.content.ilike(f"%{search}%"))
+        )
+        stmt = stmt.where(
+            Conversation.customer_id.ilike(f"%{search}%") | msg_match
+        )
     stmt = stmt.order_by(Conversation.created_at.desc()).limit(limit).offset(offset)
     result = await db.execute(stmt)
     return result.scalars().all()
@@ -297,6 +309,54 @@ async def owner_reply(
     })
 
     return outbound_msg
+
+
+@router.get("/shop/conversations/{conversation_id}/export")
+async def export_conversation(
+    conversation_id: uuid.UUID,
+    format: str = Query("txt", pattern="^(txt|csv)$"),
+    shop_id: uuid.UUID = Depends(get_current_shop_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Export a conversation transcript as text or CSV."""
+    convo_stmt = select(Conversation).where(
+        Conversation.id == conversation_id,
+        Conversation.shop_id == shop_id,
+    )
+    convo_result = await db.execute(convo_stmt)
+    if not convo_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    stmt = (
+        select(Message)
+        .where(Message.conversation_id == conversation_id)
+        .order_by(Message.created_at.asc())
+    )
+    result = await db.execute(stmt)
+    messages = [
+        {
+            "created_at": m.created_at,
+            "direction": m.direction,
+            "sender_type": m.sender_type,
+            "content": m.content,
+        }
+        for m in result.scalars()
+    ]
+
+    if format == "csv":
+        content = messages_to_csv(messages)
+        media_type = "text/csv"
+        filename = f"conversation-{conversation_id}.csv"
+    else:
+        content = messages_to_transcript(messages)
+        media_type = "text/plain"
+        filename = f"conversation-{conversation_id}.txt"
+
+    return StreamingResponse(
+        iter([content]),
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.post("/shop/conversations/{conversation_id}/close")
@@ -448,6 +508,23 @@ async def get_shop_analytics(
     days_map = {"today": 1, "7d": 7, "30d": 30}
     days = days_map.get(period, 7)
     return await redis_client.get_analytics(str(shop_id), days)
+
+
+@router.get("/shop/analytics/export")
+async def export_analytics(
+    period: str = Query("7d", pattern="^(today|7d|30d)$"),
+    shop_id: uuid.UUID = Depends(get_current_shop_id),
+):
+    """Export analytics as CSV."""
+    days_map = {"today": 1, "7d": 7, "30d": 30}
+    days = days_map.get(period, 7)
+    data = await redis_client.get_analytics(str(shop_id), days)
+    content = analytics_to_csv(data)
+    return StreamingResponse(
+        iter([content]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="analytics-{period}.csv"'},
+    )
 
 
 # ─── Compensation Tiers ─────────────────────────────────────────────────────
