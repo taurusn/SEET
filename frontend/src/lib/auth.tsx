@@ -16,6 +16,9 @@ interface Shop {
   wa_phone_number_id?: string;
   wa_waba_id?: string;
   is_active: boolean;
+  logo_url?: string;
+  brand_color?: string;
+  splash_text?: string;
   created_at: string;
 }
 
