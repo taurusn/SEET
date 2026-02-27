@@ -742,17 +742,17 @@ export default function ShopDetailPage() {
                 <div className="bg-card border border-border rounded-xl p-5">
                   <h3 className="text-sm font-semibold mb-3">Messages by Hour</h3>
                   <div className="flex items-end gap-[3px] h-24">
-                    {analytics.messages_by_hour.map((v, i) => {
+                    {(() => {
                       const max = Math.max(...analytics.messages_by_hour, 1);
-                      return (
+                      return analytics.messages_by_hour.map((v, i) => (
                         <div
                           key={i}
                           className="flex-1 bg-primary/20 hover:bg-primary/40 rounded-sm transition-colors"
                           style={{ height: `${(v / max) * 100}%`, minHeight: v > 0 ? "4px" : "1px" }}
                           title={`${i}:00 — ${v} messages`}
                         />
-                      );
-                    })}
+                      ));
+                    })()}
                   </div>
                   <div className="flex justify-between mt-1">
                     <span className="text-[10px] text-muted-foreground">0:00</span>
@@ -805,17 +805,17 @@ export default function ShopDetailPage() {
                 <div className="bg-card border border-border rounded-xl p-5">
                   <h3 className="text-sm font-semibold mb-3">Daily Messages</h3>
                   <div className="flex items-end gap-1 h-24">
-                    {analytics.messages_by_day.map((day) => {
+                    {(() => {
                       const max = Math.max(...analytics.messages_by_day.map((d) => d.messages), 1);
-                      return (
+                      return analytics.messages_by_day.map((day) => (
                         <div
                           key={day.date}
                           className="flex-1 bg-success/20 hover:bg-success/40 rounded-sm transition-colors"
                           style={{ height: `${(day.messages / max) * 100}%`, minHeight: day.messages > 0 ? "4px" : "1px" }}
                           title={`${day.date} — ${day.messages} messages`}
                         />
-                      );
-                    })}
+                      ));
+                    })()}
                   </div>
                   {analytics.messages_by_day.length > 1 && (
                     <div className="flex justify-between mt-1">

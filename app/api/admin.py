@@ -71,6 +71,7 @@ async def seed_first_admin(data: AdminCreate, db: AsyncSession = Depends(get_db)
         email=data.email.lower().strip(),
         password_hash=hash_password(data.password.strip()),
         name=data.name,
+        role="superadmin",
     )
     db.add(admin)
     await db.flush()
@@ -707,17 +708,19 @@ async def export_shop_data(
             headers={"Content-Disposition": f'attachment; filename="{safe_name}-analytics-{period}.csv"'},
         )
 
-    # type == "conversations" — single joined query (avoids N+1)
+    # type == "conversations" — single joined query (avoids N+1), capped at 50k rows
     result = await db.execute(
         select(Message)
         .join(Conversation, Message.conversation_id == Conversation.id)
         .where(Conversation.shop_id == shop_id)
         .order_by(Message.created_at.asc())
+        .limit(50000)
     )
     messages = result.scalars().all()
 
     all_messages = [
         {
+            "conversation_id": str(m.conversation_id),
             "created_at": m.created_at,
             "direction": m.direction,
             "sender_type": m.sender_type,
