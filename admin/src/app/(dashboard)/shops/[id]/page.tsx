@@ -14,6 +14,7 @@ import {
   ArrowUpRight,
   CheckCircle,
   Clock,
+  Download,
 } from "lucide-react";
 
 interface ShopDetail {
@@ -49,6 +50,23 @@ interface Analytics {
   sentiment_breakdown: { positive: number; neutral: number; negative: number };
 }
 
+interface ConvoItem {
+  id: string;
+  platform: string;
+  customer_id: string;
+  status: string;
+  sentiment?: string | null;
+  created_at: string;
+}
+
+interface MessageItem {
+  id: string;
+  direction: string;
+  sender_type: string;
+  content: string;
+  created_at: string;
+}
+
 const periods = [
   { value: "today", label: "Today" },
   { value: "7d", label: "7 Days" },
@@ -60,7 +78,7 @@ export default function ShopDetailPage() {
   const router = useRouter();
   const [shop, setShop] = useState<ShopDetail | null>(null);
   const [contexts, setContexts] = useState<ContextItem[]>([]);
-  const [tab, setTab] = useState<"profile" | "context" | "stats">("profile");
+  const [tab, setTab] = useState<"profile" | "context" | "stats" | "conversations">("profile");
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
     name: "",
@@ -76,6 +94,11 @@ export default function ShopDetailPage() {
   const [error, setError] = useState("");
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
   const [analyticsPeriod, setAnalyticsPeriod] = useState("7d");
+  const [convos, setConvos] = useState<ConvoItem[]>([]);
+  const [convosLoading, setConvosLoading] = useState(false);
+  const [selectedConvoId, setSelectedConvoId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<MessageItem[]>([]);
+  const [messagesLoading, setMessagesLoading] = useState(false);
 
   const loadShop = useCallback(async () => {
     try {
@@ -118,6 +141,31 @@ export default function ShopDetailPage() {
         .catch(() => setAnalytics(null));
     }
   }, [id, tab, analyticsPeriod]);
+
+  useEffect(() => {
+    if (tab === "conversations") {
+      setConvosLoading(true);
+      api
+        .get<ConvoItem[]>(`/api/v1/admin/shops/${id}/conversations?limit=100`)
+        .then((data) => {
+          setConvos(data);
+          if (data.length > 0 && !selectedConvoId) setSelectedConvoId(data[0].id);
+        })
+        .catch(() => setConvos([]))
+        .finally(() => setConvosLoading(false));
+    }
+  }, [id, tab]);
+
+  useEffect(() => {
+    if (selectedConvoId && tab === "conversations") {
+      setMessagesLoading(true);
+      api
+        .get<MessageItem[]>(`/api/v1/admin/shops/${id}/conversations/${selectedConvoId}/messages`)
+        .then(setMessages)
+        .catch(() => setMessages([]))
+        .finally(() => setMessagesLoading(false));
+    }
+  }, [id, selectedConvoId, tab]);
 
   const saveProfile = async () => {
     setSaving(true);
@@ -250,16 +298,56 @@ export default function ShopDetailPage() {
             </p>
           </div>
         </div>
-        <button
-          onClick={toggleActive}
-          className={`px-4 py-2 rounded-lg text-sm font-medium ${
-            shop.is_active
-              ? "bg-danger/10 text-danger hover:bg-danger/20"
-              : "bg-success/10 text-success hover:bg-success/20"
-          } transition-colors`}
-        >
-          {shop.is_active ? "Deactivate" : "Activate"}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={async () => {
+              const token = localStorage.getItem("admin_token");
+              const res = await fetch(`/api/v1/admin/shops/${id}/export?type=conversations`, {
+                headers: { Authorization: `Bearer ${token}` },
+              });
+              const blob = await res.blob();
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = `${shop.name}-conversations.csv`;
+              a.click();
+              URL.revokeObjectURL(url);
+            }}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted border border-border transition-colors"
+          >
+            <Download className="w-3.5 h-3.5" />
+            Export Conversations
+          </button>
+          <button
+            onClick={async () => {
+              const token = localStorage.getItem("admin_token");
+              const res = await fetch(`/api/v1/admin/shops/${id}/export?type=analytics&period=30d`, {
+                headers: { Authorization: `Bearer ${token}` },
+              });
+              const blob = await res.blob();
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = `${shop.name}-analytics.csv`;
+              a.click();
+              URL.revokeObjectURL(url);
+            }}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted border border-border transition-colors"
+          >
+            <Download className="w-3.5 h-3.5" />
+            Export Analytics
+          </button>
+          <button
+            onClick={toggleActive}
+            className={`px-4 py-2 rounded-lg text-sm font-medium ${
+              shop.is_active
+                ? "bg-danger/10 text-danger hover:bg-danger/20"
+                : "bg-success/10 text-success hover:bg-success/20"
+            } transition-colors`}
+          >
+            {shop.is_active ? "Deactivate" : "Activate"}
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -270,7 +358,7 @@ export default function ShopDetailPage() {
 
       {/* Tabs */}
       <div className="flex gap-1 mb-6 border-b border-border">
-        {(["profile", "context", "stats"] as const).map((t) => (
+        {(["profile", "context", "stats", "conversations"] as const).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -489,6 +577,91 @@ export default function ShopDetailPage() {
             >
               <Plus size={14} /> Add
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Conversations Tab (A-38) */}
+      {tab === "conversations" && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* Conversation list */}
+          <div className="md:col-span-1 bg-card rounded-xl border border-border overflow-hidden max-h-[70vh] overflow-y-auto">
+            {convosLoading ? (
+              <div className="flex justify-center py-12">
+                <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+              </div>
+            ) : convos.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-12">No conversations</p>
+            ) : (
+              <div className="divide-y divide-border">
+                {convos.map((c) => (
+                  <button
+                    key={c.id}
+                    onClick={() => setSelectedConvoId(c.id)}
+                    className={cn(
+                      "w-full text-left px-4 py-3 text-sm transition-colors",
+                      selectedConvoId === c.id ? "bg-primary/5" : "hover:bg-muted/30"
+                    )}
+                  >
+                    <div className="flex items-center justify-between mb-0.5">
+                      <span className="font-medium truncate">{c.customer_id}</span>
+                      <span className={cn(
+                        "px-1.5 py-0.5 rounded text-[10px] font-medium",
+                        c.status === "ai" ? "bg-primary/10 text-primary" :
+                        c.status === "human" ? "bg-warning/10 text-warning" :
+                        "bg-muted text-muted-foreground"
+                      )}>
+                        {c.status}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <span>{c.platform}</span>
+                      <span>{c.created_at?.slice(0, 10)}</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Message thread (read-only) */}
+          <div className="md:col-span-2 bg-card rounded-xl border border-border max-h-[70vh] overflow-y-auto">
+            {!selectedConvoId ? (
+              <div className="flex flex-col items-center justify-center py-24 text-muted-foreground">
+                <MessageSquare className="w-7 h-7 opacity-50 mb-2" />
+                <p className="text-sm">Select a conversation</p>
+              </div>
+            ) : messagesLoading ? (
+              <div className="flex justify-center py-12">
+                <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+              </div>
+            ) : messages.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-12">No messages</p>
+            ) : (
+              <div className="p-4 space-y-3">
+                {messages.map((m) => (
+                  <div
+                    key={m.id}
+                    className={cn(
+                      "max-w-[80%] px-3 py-2 rounded-xl text-sm",
+                      m.direction === "inbound"
+                        ? "bg-muted mr-auto"
+                        : "bg-primary/10 ml-auto"
+                    )}
+                  >
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <span className="text-[10px] font-medium text-muted-foreground uppercase">
+                        {m.sender_type}
+                      </span>
+                      <span className="text-[10px] text-muted-foreground">
+                        {m.created_at?.slice(11, 16)}
+                      </span>
+                    </div>
+                    <p className="whitespace-pre-wrap">{m.content}</p>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
