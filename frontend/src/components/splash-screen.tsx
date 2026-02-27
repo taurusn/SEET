@@ -35,7 +35,7 @@ export function SplashScreen({
     <div
       className="fixed inset-0 z-50 flex flex-col items-center justify-center overflow-hidden"
       style={{
-        background: `linear-gradient(135deg, ${color} 0%, ${color}dd 40%, ${color}bb 100%)`,
+        background: `linear-gradient(135deg, ${color} 0%, ${color} 50%, ${color}e6 100%)`,
         opacity: phase === "exit" ? 0 : 1,
         transform: phase === "exit" ? "translateY(-8px)" : "translateY(0)",
         transition: "opacity 0.5s ease, transform 0.5s ease",
