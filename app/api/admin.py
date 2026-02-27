@@ -4,6 +4,7 @@ Admin API — internal portal for onboarding team.
 All endpoints (except seed and login) require admin JWT.
 """
 
+import re
 import uuid
 from typing import Optional
 
@@ -162,7 +163,7 @@ async def list_all_shops(
     sort_by: Optional[str] = Query(None, pattern="^(conversations|handoffs|created|name)$"),
     sort_dir: str = Query("desc", pattern="^(asc|desc)$"),
     limit: int = Query(50, le=200),
-    offset: int = 0,
+    offset: int = Query(0, ge=0),
     admin: Admin = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db),
 ):
@@ -186,7 +187,8 @@ async def list_all_shops(
 
     stmt = select(Shop, convo_sub.label("convo_count"), handoff_sub.label("handoff_count"))
     if search:
-        stmt = stmt.where(Shop.name.ilike(f"%{search}%"))
+        safe = search.replace("%", r"\%").replace("_", r"\_")
+        stmt = stmt.where(Shop.name.ilike(f"%{safe}%", escape="\\"))
     if is_active is not None:
         stmt = stmt.where(Shop.is_active == is_active)
 
@@ -610,7 +612,7 @@ async def list_shop_conversations_admin(
     platform: Optional[str] = None,
     status: Optional[str] = None,
     limit: int = Query(50, le=200),
-    offset: int = 0,
+    offset: int = Query(0, ge=0),
     admin: Admin = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db),
 ):
@@ -693,6 +695,8 @@ async def export_shop_data(
     if not s:
         raise HTTPException(status_code=404, detail="Shop not found")
 
+    safe_name = re.sub(r"[^\w\-.]", "_", s.name)
+
     if type == "analytics":
         days_map = {"today": 1, "7d": 7, "30d": 30}
         data = await redis_client.get_analytics(str(shop_id), days_map.get(period, 30))
@@ -700,35 +704,31 @@ async def export_shop_data(
         return StreamingResponse(
             iter([csv_content]),
             media_type="text/csv",
-            headers={"Content-Disposition": f"attachment; filename={s.name}-analytics-{period}.csv"},
+            headers={"Content-Disposition": f'attachment; filename="{safe_name}-analytics-{period}.csv"'},
         )
 
-    # type == "conversations"
+    # type == "conversations" — single joined query (avoids N+1)
     result = await db.execute(
-        select(Conversation)
+        select(Message)
+        .join(Conversation, Message.conversation_id == Conversation.id)
         .where(Conversation.shop_id == shop_id)
-        .order_by(Conversation.created_at.desc())
+        .order_by(Message.created_at.asc())
     )
-    convos = result.scalars().all()
+    messages = result.scalars().all()
 
-    all_messages = []
-    for c in convos:
-        msg_result = await db.execute(
-            select(Message)
-            .where(Message.conversation_id == c.id)
-            .order_by(Message.created_at.asc())
-        )
-        for m in msg_result.scalars():
-            all_messages.append({
-                "created_at": m.created_at,
-                "direction": m.direction,
-                "sender_type": m.sender_type,
-                "content": m.content,
-            })
+    all_messages = [
+        {
+            "created_at": m.created_at,
+            "direction": m.direction,
+            "sender_type": m.sender_type,
+            "content": m.content,
+        }
+        for m in messages
+    ]
 
     csv_content = messages_to_csv(all_messages)
     return StreamingResponse(
         iter([csv_content]),
         media_type="text/csv",
-        headers={"Content-Disposition": f"attachment; filename={s.name}-conversations.csv"},
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}-conversations.csv"'},
     )

@@ -70,8 +70,7 @@ export default function SettingsPage() {
       await api.post("/api/v1/admin/admins", inviteForm);
       setInviteMsg({ type: "success", text: "Admin created successfully" });
       setInviteForm({ email: "", password: "", name: "", role: "admin" });
-      setShowInvite(false);
-      api.get<AdminUser[]>("/api/v1/admin/admins").then(setAdmins);
+      api.get<AdminUser[]>("/api/v1/admin/admins").then(setAdmins).catch(() => {});
     } catch (err) {
       setInviteMsg({ type: "error", text: err instanceof Error ? err.message : "Failed" });
     } finally {

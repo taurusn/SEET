@@ -1,10 +1,9 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { api } from "@/lib/api";
-import { formatDate } from "@/lib/utils";
-import { cn } from "@/lib/utils";
+import { formatDate, cn } from "@/lib/utils";
 import {
   ArrowLeft,
   Upload,
@@ -97,6 +96,8 @@ export default function ShopDetailPage() {
   const [convos, setConvos] = useState<ConvoItem[]>([]);
   const [convosLoading, setConvosLoading] = useState(false);
   const [selectedConvoId, setSelectedConvoId] = useState<string | null>(null);
+  const selectedConvoIdRef = useRef(selectedConvoId);
+  selectedConvoIdRef.current = selectedConvoId;
   const [messages, setMessages] = useState<MessageItem[]>([]);
   const [messagesLoading, setMessagesLoading] = useState(false);
 
@@ -149,7 +150,7 @@ export default function ShopDetailPage() {
         .get<ConvoItem[]>(`/api/v1/admin/shops/${id}/conversations?limit=100`)
         .then((data) => {
           setConvos(data);
-          if (data.length > 0 && !selectedConvoId) setSelectedConvoId(data[0].id);
+          if (data.length > 0 && !selectedConvoIdRef.current) setSelectedConvoId(data[0].id);
         })
         .catch(() => setConvos([]))
         .finally(() => setConvosLoading(false));
@@ -301,17 +302,20 @@ export default function ShopDetailPage() {
         <div className="flex items-center gap-2">
           <button
             onClick={async () => {
-              const token = localStorage.getItem("admin_token");
-              const res = await fetch(`/api/v1/admin/shops/${id}/export?type=conversations`, {
-                headers: { Authorization: `Bearer ${token}` },
-              });
-              const blob = await res.blob();
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement("a");
-              a.href = url;
-              a.download = `${shop.name}-conversations.csv`;
-              a.click();
-              URL.revokeObjectURL(url);
+              try {
+                const token = localStorage.getItem("admin_token");
+                const res = await fetch(`/api/v1/admin/shops/${id}/export?type=conversations`, {
+                  headers: { Authorization: `Bearer ${token}` },
+                });
+                if (!res.ok) { setError("Export failed"); return; }
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `${shop.name}-conversations.csv`;
+                a.click();
+                URL.revokeObjectURL(url);
+              } catch { setError("Export failed"); }
             }}
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted border border-border transition-colors"
           >
@@ -320,17 +324,20 @@ export default function ShopDetailPage() {
           </button>
           <button
             onClick={async () => {
-              const token = localStorage.getItem("admin_token");
-              const res = await fetch(`/api/v1/admin/shops/${id}/export?type=analytics&period=30d`, {
-                headers: { Authorization: `Bearer ${token}` },
-              });
-              const blob = await res.blob();
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement("a");
-              a.href = url;
-              a.download = `${shop.name}-analytics.csv`;
-              a.click();
-              URL.revokeObjectURL(url);
+              try {
+                const token = localStorage.getItem("admin_token");
+                const res = await fetch(`/api/v1/admin/shops/${id}/export?type=analytics&period=30d`, {
+                  headers: { Authorization: `Bearer ${token}` },
+                });
+                if (!res.ok) { setError("Export failed"); return; }
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `${shop.name}-analytics.csv`;
+                a.click();
+                URL.revokeObjectURL(url);
+              } catch { setError("Export failed"); }
             }}
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted border border-border transition-colors"
           >

@@ -199,7 +199,7 @@ async def list_conversations(
     platform: Optional[str] = None,
     search: Optional[str] = None,
     limit: int = Query(50, le=200),
-    offset: int = 0,
+    offset: int = Query(0, ge=0),
     shop_id: uuid.UUID = Depends(get_current_shop_id),
     db: AsyncSession = Depends(get_db),
 ):
@@ -209,13 +209,14 @@ async def list_conversations(
     if platform:
         stmt = stmt.where(Conversation.platform == platform)
     if search:
+        safe = search.replace("%", r"\%").replace("_", r"\_")
         msg_match = (
             sa_exists()
             .where(Message.conversation_id == Conversation.id)
-            .where(Message.content.ilike(f"%{search}%"))
+            .where(Message.content.ilike(f"%{safe}%", escape="\\"))
         )
         stmt = stmt.where(
-            Conversation.customer_id.ilike(f"%{search}%") | msg_match
+            Conversation.customer_id.ilike(f"%{safe}%", escape="\\") | msg_match
         )
     stmt = stmt.order_by(Conversation.created_at.desc()).limit(limit).offset(offset)
     result = await db.execute(stmt)
@@ -226,7 +227,7 @@ async def list_conversations(
 async def get_conversation_messages(
     conversation_id: uuid.UUID,
     limit: int = Query(50, le=200),
-    offset: int = 0,
+    offset: int = Query(0, ge=0),
     shop_id: uuid.UUID = Depends(get_current_shop_id),
     db: AsyncSession = Depends(get_db),
 ):

@@ -71,17 +71,20 @@ export default function AnalyticsPage() {
           {/* Export CSV */}
           <button
             onClick={async () => {
-              const token = localStorage.getItem("token");
-              const res = await fetch(`/api/v1/shop/analytics/export?period=${period}`, {
-                headers: { Authorization: `Bearer ${token}` },
-              });
-              const blob = await res.blob();
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement("a");
-              a.href = url;
-              a.download = `analytics-${period}.csv`;
-              a.click();
-              URL.revokeObjectURL(url);
+              try {
+                const token = localStorage.getItem("token");
+                const res = await fetch(`/api/v1/shop/analytics/export?period=${period}`, {
+                  headers: { Authorization: `Bearer ${token}` },
+                });
+                if (!res.ok) return;
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `analytics-${period}.csv`;
+                a.click();
+                URL.revokeObjectURL(url);
+              } catch { /* network error — silent */ }
             }}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted border border-border transition-colors"
           >
