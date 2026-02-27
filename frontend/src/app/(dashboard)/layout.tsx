@@ -58,14 +58,22 @@ export default function DashboardLayout({
       {/* Top bar */}
       <header className="sticky top-0 z-40 bg-background/80 backdrop-blur-md border-b border-border/50">
         <div className="max-w-7xl mx-auto px-6 md:px-8 h-14 flex items-center justify-between">
-          <Image
-            src="/seet-logo.png"
-            alt="SEET"
-            width={160}
-            height={160}
-            className="w-28"
-            priority
-          />
+          {shop?.logo_url ? (
+            <img
+              src={shop.logo_url}
+              alt={shop.name}
+              className="h-9 w-auto object-contain"
+            />
+          ) : (
+            <Image
+              src="/seet-logo.png"
+              alt="SEET"
+              width={160}
+              height={160}
+              className="w-28"
+              priority
+            />
+          )}
           {shop && (
             <span className="text-sm text-muted-foreground">
               {shop.name}
