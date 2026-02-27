@@ -1,5 +1,5 @@
 when:
-  branch: claude/multi-tenant-messaging-platform-hhjM8
+  branch: [main, feature/power-up]
   event: push
 
 steps:
@@ -12,7 +12,7 @@ steps:
     commands:
       - git config --global --add safe.directory /home/hatim/SEET
       - cd /home/hatim/SEET
-      - git fetch https://github.com/taurusn/SEET.git claude/multi-tenant-messaging-platform-hhjM8
+      - git fetch https://github.com/taurusn/SEET.git ${CI_COMMIT_BRANCH}
       - git reset --hard FETCH_HEAD
       - docker compose -p seet up --build -d || true
       - sleep 5
