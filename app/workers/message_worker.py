@@ -18,7 +18,7 @@ from app.db.database import async_session_factory
 from app.models.schemas import Shop, ShopContext, Conversation, Message
 from app.queue.rabbitmq import rabbitmq, INBOUND_QUEUE, OUTBOUND_QUEUE
 from app.services.redis_client import redis_client
-from app.services.gemini import gemini_service
+from app.services.ai_pipeline import ai_pipeline
 from app.services.handoff import trigger_handoff
 from app.services.instagram import extract_ig_messages
 from app.services.whatsapp import extract_wa_messages
@@ -251,20 +251,23 @@ async def process_message(msg: dict) -> None:
                         await db.commit()
                     continue
 
-                # Let Gemini handle the conversation — it decides when to escalate
-                # via [HANDOFF_NEEDED] based on the system prompt rules.
+                # Run the AI pipeline — handles prompt composition, parallel
+                # Gemini + sentiment calls, handoff extraction, and timing.
                 context = await get_shop_context(db, shop)
-                reply = await gemini_service.generate_reply(
-                    context, history, text, conversation_id=str(convo.id),
+                result = await ai_pipeline.process(
+                    context=context,
+                    conversation_id=str(convo.id),
+                    customer_id=customer_id,
+                    text=text,
+                    history=history,
                 )
 
-                if "[HANDOFF_NEEDED" in reply:
-                    # Parse AI-generated reason from [HANDOFF_NEEDED: reason]
-                    import re
-                    reason_match = re.search(r"\[HANDOFF_NEEDED:\s*(.+?)\]", reply)
-                    reason = reason_match.group(1).strip() if reason_match else f"رسالة العميل: {text}"
+                if result.handoff_needed:
+                    reason = result.handoff_reason or f"رسالة العميل: {text}"
                     await trigger_handoff(db, str(convo.id), reason=reason)
                     reply = HANDOFF_REPLY
+                else:
+                    reply = result.reply
 
                 # Save outbound message
                 outbound_msg = await save_message(db, convo.id, "outbound", reply, "ai")

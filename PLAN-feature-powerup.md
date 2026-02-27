@@ -34,7 +34,7 @@ This plan adds 7 features that transform SEET from "a chatbot" into "a business 
 
 ```
 Phase 0 (Architecture — build first):
-  F0: Agentic AI Pipeline     [M]  ← see PLAN-agentic-pipeline.md
+  F0: Agentic AI Pipeline     [M]  ✅ DONE  ← see PLAN-agentic-pipeline.md
 
 Phase 1 (Features on new pipeline):
   F1: AI Sales Mode              [S]  ← conditional prompt module in pipeline

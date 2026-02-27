@@ -43,7 +43,7 @@ from app.models.schemas import (
 from app.services.encryption import encrypt_token
 from app.services.redis_client import redis_client
 from app.services.handoff import resolve_handoff, trigger_handoff
-from app.services.gemini import gemini_service
+from app.services.ai_pipeline import ai_pipeline
 from app.workers.message_worker import get_shop_context, get_recent_messages, save_message, HANDOFF_REPLY
 from app.services.voucher import generate_voucher_code, is_voucher_expired
 from app.queue.rabbitmq import rabbitmq, OUTBOUND_QUEUE
@@ -704,26 +704,25 @@ async def playground_chat(
     # Save user message
     user_msg = await save_message(db, convo.id, "inbound", data.message, "customer")
 
-    # Let Gemini handle the conversation — it decides when to escalate
-    # via [HANDOFF_NEEDED] based on the system prompt rules.
-    handoff_detected = False
+    # Run the AI pipeline — handles prompt composition, parallel
+    # Gemini + sentiment calls, handoff extraction, and timing.
     context = await get_shop_context(db, shop)
-    reply_text = await gemini_service.generate_reply(
-        context, history, data.message, conversation_id=str(convo.id),
+    result = await ai_pipeline.process(
+        context=context,
+        conversation_id=str(convo.id),
+        customer_id=convo.customer_id,
+        text=data.message,
+        history=history,
     )
 
-    if "[HANDOFF_NEEDED" in reply_text:
-        import re
-        reason_match = re.search(r"\[HANDOFF_NEEDED:\s*(.+?)\]", reply_text)
-        handoff_reason = reason_match.group(1).strip() if reason_match else f"رسالة العميل: {data.message}"
-        reply_text = HANDOFF_REPLY
-        handoff_detected = True
-
-    # Create handoff request so it appears in the dashboard
+    handoff_detected = result.handoff_needed
     if handoff_detected:
+        reply_text = HANDOFF_REPLY
         await trigger_handoff(
-            db, str(convo.id), reason=handoff_reason
+            db, str(convo.id), reason=result.handoff_reason or f"رسالة العميل: {data.message}"
         )
+    else:
+        reply_text = result.reply
 
     # Save AI reply
     ai_msg = await save_message(db, convo.id, "outbound", reply_text, "ai")

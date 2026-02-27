@@ -16,6 +16,7 @@ GEMINI_WINDOW = 20   # messages sent to Gemini per request
 # ─── Base System Prompt ──────────────────────────────────────────────────────
 # This is the immutable behavioral layer that governs ALL shops.
 # Shop-specific context (menu, hours, etc.) gets appended below it.
+# ⚠️ This prompt is carefully tuned — do NOT trim or rephrase rules.
 
 BASE_SYSTEM_PROMPT = """# قواعد مطلقة (لا يمكن كسرها)
 1. ممنوع أي إيموجي أو رموز تعبيرية — ولا واحد. لا 👍 ولا ☕ ولا 😄 ولا أي رمز يونيكود. ردك نص فقط.
@@ -98,6 +99,48 @@ BASE_SYSTEM_PROMPT = """# قواعد مطلقة (لا يمكن كسرها)
 """
 
 
+# ─── Conditional Modules ─────────────────────────────────────────────────────
+# Injected into the prompt ONLY when the shop has the relevant context configured.
+
+SALES_MODULE = """# البيع والتوصيات
+ساعد العميل يلقى اللي يناسبه. إذا طلب شي → اقترح إضافة بأسلوب لطيف.
+لا تبيع بالغصب — إذا قال لا، احترم قراره.
+## تعليمات البيع:
+{sales_content}
+"""
+
+
+def build_modular_prompt(context: dict, customer_info: dict | None = None) -> str:
+    """Build a complete system prompt from base + shop context + conditional modules.
+
+    Preserves the full tuned BASE_SYSTEM_PROMPT and appends shop-specific data.
+    Conditional modules (sales, etc.) are only added when their context exists.
+    """
+    prompt = BASE_SYSTEM_PROMPT
+
+    # Shop data — always injected
+    name = context.get("name", "the shop")
+    prompt += f"\n# معلومات المحل — {name}\n"
+    prompt += f"- اسم المحل: {name}\n"
+
+    for key, label in [
+        ("menu", "المنيو / الخدمات"),
+        ("hours", "أوقات العمل"),
+        ("location", "الموقع"),
+        ("tone", "الأسلوب المطلوب"),
+        ("faq", "أسئلة شائعة"),
+    ]:
+        value = context.get(key)
+        if value:
+            prompt += f"- {label}: {value}\n"
+
+    # Sales module — conditional
+    if context.get("sales"):
+        prompt += SALES_MODULE.format(sales_content=context["sales"])
+
+    return prompt
+
+
 class GeminiService:
     """Gemini LLM integration with circuit breaker pattern."""
 
@@ -112,12 +155,16 @@ class GeminiService:
 
     async def generate_reply(
         self,
-        shop_context: dict,
+        shop_context_or_prompt: dict | str,
         history: list[dict],
         customer_message: str,
         conversation_id: str = "",
     ) -> str:
-        """Generate an AI reply using Gemini, with circuit breaker fallback."""
+        """Generate an AI reply using Gemini, with circuit breaker fallback.
+
+        shop_context_or_prompt: either a shop context dict (legacy) or a pre-built
+        system prompt string (from the pipeline).
+        """
         # Check circuit breaker
         if await redis_client.is_circuit_open("gemini"):
             logger.warning("Gemini circuit breaker is OPEN, returning fallback")
@@ -128,7 +175,10 @@ class GeminiService:
 
         # Build conversation summary for long chats and inject into system prompt
         summary_prefix = await self._maybe_summarize(history, conversation_id)
-        system_prompt = self._build_system_prompt(shop_context)
+        if isinstance(shop_context_or_prompt, str):
+            system_prompt = shop_context_or_prompt
+        else:
+            system_prompt = self._build_system_prompt(shop_context_or_prompt)
         if summary_prefix:
             system_prompt += f"\n{summary_prefix}\n"
 
