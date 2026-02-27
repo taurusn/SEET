@@ -46,10 +46,9 @@ body {
   font-family: "IBM Plex Sans Arabic", sans-serif;
 }
 
-/* Scrollbar */
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+/* Hide scrollbar but keep scroll */
+::-webkit-scrollbar { display: none; }
+* { -ms-overflow-style: none; scrollbar-width: none; }
 
 /* Dock */
 .dock-glass {
