@@ -85,7 +85,7 @@ async def resolve_handoff(
     # sender_type="ai" ensures it passes the DB filter in get_recent_messages.
     # The message is NOT published to the outbound queue — customer never sees it.
     from app.models.schemas import Message
-    note_text = resolution_note or "[تم حل الموضوع مع المسؤول. المحادثة رجعت للوضع العادي.]"
+    note_text = resolution_note or "[المسؤول رد على العميل وحل الموضوع. المحادثة رجعت للوضع العادي.]"
     bridge = Message(
         conversation_id=conversation_id,
         direction="outbound",

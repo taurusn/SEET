@@ -10,6 +10,7 @@ Run with: python -m app.workers.message_worker
 import asyncio
 import logging
 import uuid
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -268,6 +269,15 @@ async def process_message(msg: dict) -> None:
                 # Store sentiment on conversation
                 if result.sentiment:
                     convo.sentiment = result.sentiment
+
+                # Track analytics in Redis
+                await redis_client.track_message_processed(
+                    shop_id=str(shop.id),
+                    response_time_ms=result.response_time_ms,
+                    was_escalated=result.handoff_needed,
+                    sentiment=result.sentiment,
+                    hour=datetime.now(timezone.utc).hour,
+                )
 
                 if result.handoff_needed:
                     reason = result.handoff_reason or f"رسالة العميل: {text}"

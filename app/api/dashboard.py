@@ -375,6 +375,23 @@ async def get_shop_stats(
     }
 
 
+# ─── Analytics ───────────────────────────────────────────────────────────────
+
+
+@router.get("/shop/analytics")
+async def get_shop_analytics(
+    period: str = Query("7d", pattern="^(today|7d|30d)$"),
+    shop_id: uuid.UUID = Depends(get_current_shop_id),
+):
+    """Get analytics for this shop.
+
+    Period: today (1 day), 7d (7 days), 30d (30 days).
+    """
+    days_map = {"today": 1, "7d": 7, "30d": 30}
+    days = days_map.get(period, 7)
+    return await redis_client.get_analytics(str(shop_id), days)
+
+
 # ─── Compensation Tiers ─────────────────────────────────────────────────────
 
 
