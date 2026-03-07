@@ -17,14 +17,14 @@ const variants = {
 
 export function StatsCard({ label, value, icon: Icon, variant = "default" }: StatsCardProps) {
   return (
-    <div className="bg-card rounded-2xl border border-border p-5 shadow-sm">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm text-muted-foreground">{label}</p>
-          <p className="text-2xl font-bold mt-1">{value}</p>
+    <div className="bg-card rounded-2xl border border-border p-4 md:p-5 shadow-sm">
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-xs md:text-sm text-muted-foreground truncate">{label}</p>
+          <p className="text-xl md:text-2xl font-bold mt-1">{value}</p>
         </div>
-        <div className={cn("w-12 h-12 rounded-xl flex items-center justify-center", variants[variant])}>
-          <Icon className="w-6 h-6" />
+        <div className={cn("w-10 h-10 md:w-12 md:h-12 rounded-xl flex items-center justify-center flex-shrink-0", variants[variant])}>
+          <Icon className="w-5 h-5 md:w-6 md:h-6" />
         </div>
       </div>
     </div>

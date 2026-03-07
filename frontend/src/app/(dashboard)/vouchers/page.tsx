@@ -104,7 +104,7 @@ export default function VouchersPage() {
       )}
 
       {/* Tabs */}
-      <div className="flex gap-1 mb-4 bg-muted rounded-xl p-1 w-fit">
+      <div className="flex gap-1 mb-4 bg-muted rounded-xl p-1 w-fit max-w-full overflow-x-auto">
         {tabs.map((t) => (
           <button
             key={t.value}

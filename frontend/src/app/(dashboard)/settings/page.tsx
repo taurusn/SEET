@@ -90,13 +90,13 @@ export default function SettingsPage() {
       <h1 className="text-2xl font-bold mb-6">الإعدادات</h1>
 
       {/* Tabs */}
-      <div className="flex gap-1 mb-6 bg-muted rounded-xl p-1 w-fit">
+      <div className="flex gap-1 mb-6 bg-muted rounded-xl p-1 w-fit max-w-full overflow-x-auto">
         {tabs.map((t) => (
           <button
             key={t.value}
             onClick={() => setActiveTab(t.value)}
             className={cn(
-              "px-4 py-2 rounded-lg text-sm font-medium transition-colors",
+              "px-3 md:px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap",
               activeTab === t.value
                 ? "bg-card text-foreground shadow-sm"
                 : "text-muted-foreground hover:text-foreground"

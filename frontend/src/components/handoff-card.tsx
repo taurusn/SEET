@@ -46,7 +46,7 @@ export function HandoffCard({
               السبب: {handoff.reason}
             </p>
           )}
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             <Link
               href={`/conversations?id=${handoff.conversation_id}`}
               className="px-3 py-1.5 text-xs font-medium rounded-lg bg-muted text-foreground hover:bg-muted/80 transition-colors flex items-center gap-1"

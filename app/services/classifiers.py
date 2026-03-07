@@ -14,7 +14,7 @@ from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-SENTIMENT_PROMPT = "صنّف مزاج هالرسالة. رد بكلمة وحدة بس: positive أو neutral أو negative"
+SENTIMENT_PROMPT = "صنّف هالرسالة من عميل لمحل تجاري. رد بكلمة وحدة بس: positive أو neutral أو negative. الرسائل اللي فيها شكوى أو إزعاج أو إساءة أو تحرش أو ألفاظ سيئة = negative. المدح والشكر = positive. الأسئلة العادية = neutral"
 
 VALID_SENTIMENTS = {"positive", "neutral", "negative"}
 

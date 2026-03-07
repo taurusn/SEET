@@ -97,16 +97,16 @@ export default function DashboardPage() {
           href="/analytics"
           className="block mb-6 p-4 rounded-2xl bg-card border border-border shadow-sm hover:border-primary/30 transition-colors"
         >
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2">
-                <Bot className="w-4 h-4 text-primary" />
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3 md:gap-4 flex-wrap min-w-0">
+              <div className="flex items-center gap-1.5">
+                <Bot className="w-4 h-4 text-primary flex-shrink-0" />
                 <span className="text-sm font-medium">
                   {analytics.ai_handled_pct}% تعامل الذكاء الاصطناعي
                 </span>
               </div>
-              <div className="flex items-center gap-2">
-                <Clock className="w-4 h-4 text-success" />
+              <div className="flex items-center gap-1.5">
+                <Clock className="w-4 h-4 text-success flex-shrink-0" />
                 <span className="text-sm font-medium">
                   {analytics.avg_response_time_ms < 1000
                     ? `${analytics.avg_response_time_ms}ms`
@@ -115,7 +115,7 @@ export default function DashboardPage() {
                 </span>
               </div>
             </div>
-            <span className="text-xs text-muted-foreground">آخر ٧ أيام →</span>
+            <span className="text-xs text-muted-foreground flex-shrink-0 hidden sm:inline">آخر ٧ أيام →</span>
           </div>
         </Link>
       )}
