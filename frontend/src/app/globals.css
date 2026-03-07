@@ -38,6 +38,8 @@
   --sidebar: #0a2a2a;
   --sidebar-foreground: #ccfbf1;
   --sidebar-active: #115e59;
+  --sidebar-rgb: 10, 42, 42;
+  --primary-rgb: 17, 94, 89;
 }
 
 body {
@@ -92,7 +94,7 @@ body {
 
 /* Dock */
 .dock-glass {
-  background: rgba(10, 35, 35, 0.95);
+  background: rgba(var(--sidebar-rgb), 0.95);
   backdrop-filter: blur(24px) saturate(180%);
   -webkit-backdrop-filter: blur(24px) saturate(180%);
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -103,7 +105,7 @@ body {
 }
 
 .dock-icon-active {
-  box-shadow: 0 4px 16px rgba(17, 94, 89, 0.45);
+  box-shadow: 0 4px 16px rgba(var(--primary-rgb), 0.45);
 }
 
 /* Touch feedback for mobile */
@@ -118,7 +120,7 @@ body {
   bottom: calc(100% + 10px);
   left: 50%;
   transform: translateX(-50%) translateY(4px);
-  background: rgba(10, 35, 35, 0.92);
+  background: rgba(var(--sidebar-rgb), 0.92);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   color: #fff;

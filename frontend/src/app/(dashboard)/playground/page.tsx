@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { cn, timeAgo } from "@/lib/utils";
-import { Bot, User, Plus, Trash2, Send, Loader2, FlaskConical } from "lucide-react";
+import { Bot, User, Plus, Trash2, Send, Loader2, FlaskConical, ArrowRight } from "lucide-react";
 
 interface Conversation {
   id: string;
@@ -116,8 +116,11 @@ export default function PlaygroundPage() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {/* Conversation list */}
-        <div className="md:col-span-1 bg-card rounded-2xl border border-border shadow-sm overflow-hidden max-h-[70vh] flex flex-col">
+        {/* Conversation list — hidden on mobile when a thread is selected */}
+        <div className={cn(
+          "md:col-span-1 bg-card rounded-2xl border border-border shadow-sm overflow-hidden max-h-[70vh] flex flex-col",
+          selectedId ? "hidden md:flex" : "flex"
+        )}>
           <div className="p-3 border-b border-border">
             <button
               onClick={handleNewChat}
@@ -158,7 +161,7 @@ export default function PlaygroundPage() {
                   </button>
                   <button
                     onClick={() => handleDelete(convo.id)}
-                    className="p-2 ml-1 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-danger transition-all"
+                    className="p-2 ml-1 md:opacity-0 md:group-hover:opacity-100 text-muted-foreground hover:text-danger transition-all"
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
@@ -168,10 +171,23 @@ export default function PlaygroundPage() {
           </div>
         </div>
 
-        {/* Chat thread */}
-        <div className="md:col-span-2 bg-card rounded-2xl border border-border shadow-sm max-h-[70vh] flex flex-col">
+        {/* Chat thread — hidden on mobile when no thread is selected */}
+        <div className={cn(
+          "md:col-span-2 bg-card rounded-2xl border border-border shadow-sm max-h-[70vh] flex flex-col",
+          selectedId ? "flex" : "hidden md:flex"
+        )}>
           {selectedId ? (
             <>
+              {/* Mobile back button */}
+              <div className="md:hidden p-3 border-b border-border">
+                <button
+                  onClick={() => { setSelectedId(null); setMessages([]); }}
+                  className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
+                >
+                  <ArrowRight className="w-4 h-4" />
+                  العودة للقائمة
+                </button>
+              </div>
               <div className="flex-1 overflow-y-auto p-4 space-y-3">
                 {messagesLoading ? (
                   <div className="flex items-center justify-center py-12">

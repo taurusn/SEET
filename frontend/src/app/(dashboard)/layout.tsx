@@ -2,10 +2,11 @@
 
 import { useAuth } from "@/lib/auth";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import { Dock } from "@/components/sidebar";
 import { SplashScreen } from "@/components/splash-screen";
 import { useSSE, notifyHandoff, SSEEvent } from "@/lib/sse";
+import { generateTheme, applyTheme, clearTheme } from "@/lib/theme";
 import Image from "next/image";
 
 export default function DashboardLayout({
@@ -17,8 +18,34 @@ export default function DashboardLayout({
   const router = useRouter();
   const [showSplash, setShowSplash] = useState(false);
 
+  // White-label theme: apply cached palette immediately to prevent flash
+  useLayoutEffect(() => {
+    const cached = localStorage.getItem("seet_theme");
+    if (cached) {
+      try {
+        applyTheme(JSON.parse(cached));
+      } catch { /* invalid cache, ignore */ }
+    }
+    return () => clearTheme();
+  }, []);
+
+  // White-label theme: generate and apply when shop loads
+  useEffect(() => {
+    if (shop?.brand_color) {
+      const palette = generateTheme(shop.brand_color);
+      applyTheme(palette);
+      localStorage.setItem("seet_theme", JSON.stringify(palette));
+    } else if (shop) {
+      // No brand color — clear any stale overrides, use CSS defaults (SEET teal)
+      clearTheme();
+      localStorage.removeItem("seet_theme");
+    }
+  }, [shop]);
+
   useEffect(() => {
     if (!loading && !token) {
+      localStorage.removeItem("seet_theme");
+      clearTheme();
       router.push("/login");
     }
   }, [token, loading, router]);
@@ -70,7 +97,7 @@ export default function DashboardLayout({
 
       {/* Top bar */}
       <header className="sticky top-0 z-40 bg-background/80 backdrop-blur-md border-b border-border/50">
-        <div className="max-w-7xl mx-auto px-6 md:px-8 h-14 flex items-center justify-between">
+        <div className="max-w-7xl mx-auto px-4 md:px-8 h-14 flex items-center justify-between">
           {shop?.logo_url ? (
             <img
               src={shop.logo_url}
@@ -97,7 +124,7 @@ export default function DashboardLayout({
 
       <Dock />
       <main className="min-h-[calc(100vh-3.5rem)] pb-28">
-        <div className="p-6 md:p-8 max-w-7xl mx-auto">{children}</div>
+        <div className="p-4 md:p-8 max-w-7xl mx-auto">{children}</div>
       </main>
     </div>
   );

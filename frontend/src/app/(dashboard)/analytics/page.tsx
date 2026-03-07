@@ -64,10 +64,10 @@ export default function AnalyticsPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between gap-3 mb-6 flex-wrap">
         <h1 className="text-2xl font-bold">التحليلات</h1>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 md:gap-3">
           {/* Export CSV */}
           <button
             onClick={async () => {
@@ -89,7 +89,7 @@ export default function AnalyticsPage() {
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted border border-border transition-colors"
           >
             <Download className="w-3.5 h-3.5" />
-            تصدير CSV
+            <span className="hidden sm:inline">تصدير CSV</span>
           </button>
           {/* Period selector */}
           <div className="flex gap-1 bg-muted rounded-xl p-1">

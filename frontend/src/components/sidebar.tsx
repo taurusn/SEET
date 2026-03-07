@@ -104,7 +104,7 @@ export function Dock() {
         onMouseMove={handleMouseMove}
         onMouseLeave={handleMouseLeave}
         onTouchStart={handleTouchStart}
-        className="dock-glass flex items-end gap-1 px-2.5 pb-2 pt-2 rounded-[22px]"
+        className="dock-glass flex items-end gap-0.5 md:gap-1 px-1.5 md:px-2.5 pb-1.5 md:pb-2 pt-1.5 md:pt-2 rounded-[18px] md:rounded-[22px]"
       >
         {navItems.map((item, i) => {
           const isActive =
@@ -126,7 +126,7 @@ export function Dock() {
               <Link href={item.href} className="block">
                 <div
                   className={cn(
-                    "dock-icon w-11 h-11 md:w-12 md:h-12 rounded-[13px] flex items-center justify-center relative",
+                    "dock-icon w-9 h-9 md:w-12 md:h-12 rounded-[11px] md:rounded-[13px] flex items-center justify-center relative",
                     isActive
                       ? "bg-primary text-white dock-icon-active"
                       : "bg-white/[0.08] text-white/60 hover:bg-white/[0.15] hover:text-white/90"
@@ -140,7 +140,7 @@ export function Dock() {
                         : "transform 0.3s cubic-bezier(0.33,1,0.68,1), background-color 0.2s, color 0.2s",
                   }}
                 >
-                  <Icon className="w-[22px] h-[22px]" />
+                  <Icon className="w-[18px] h-[18px] md:w-[22px] md:h-[22px]" />
                   {showBadge && (
                     <span className="dock-badge">
                       {handoffCount > 9 ? "9+" : handoffCount}
@@ -159,7 +159,7 @@ export function Dock() {
         })}
 
         {/* Separator */}
-        <div className="w-px h-8 bg-white/[0.12] mx-1 mb-1 self-center" />
+        <div className="w-px h-6 md:h-8 bg-white/[0.12] mx-0.5 md:mx-1 mb-1 self-center" />
 
         {/* Logout */}
         <div
@@ -171,7 +171,7 @@ export function Dock() {
           <span className="dock-tooltip">تسجيل خروج</span>
           <button onClick={logout} className="block">
             <div
-              className="dock-icon w-11 h-11 md:w-12 md:h-12 rounded-[13px] flex items-center justify-center bg-white/[0.08] text-white/60 hover:bg-danger/20 hover:text-danger"
+              className="dock-icon w-9 h-9 md:w-12 md:h-12 rounded-[11px] md:rounded-[13px] flex items-center justify-center bg-white/[0.08] text-white/60 hover:bg-danger/20 hover:text-danger"
               style={{
                 transform: `scale(${getScale(navItems.length)})`,
                 transformOrigin: "bottom center",
@@ -181,7 +181,7 @@ export function Dock() {
                     : "transform 0.3s cubic-bezier(0.33,1,0.68,1), background-color 0.2s, color 0.2s",
               }}
             >
-              <LogOut className="w-[22px] h-[22px]" />
+              <LogOut className="w-[18px] h-[18px] md:w-[22px] md:h-[22px]" />
             </div>
           </button>
         </div>

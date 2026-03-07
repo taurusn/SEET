@@ -155,7 +155,7 @@ export function BusinessHoursEditor({
         {DAYS.map((day) => (
           <div
             key={day.key}
-            className="flex items-center gap-3 p-3 rounded-xl border border-border bg-card"
+            className="flex flex-wrap items-center gap-2 md:gap-3 p-3 rounded-xl border border-border bg-card"
           >
             <label className="flex items-center gap-2 min-w-[90px]">
               <input
@@ -167,7 +167,7 @@ export function BusinessHoursEditor({
               <span className="text-sm font-medium">{day.label}</span>
             </label>
             {enabledDays[day.key] ? (
-              <div className="flex items-center gap-2 flex-1">
+              <div className="flex items-center gap-2 flex-1 min-w-0">
                 <input
                   type="time"
                   value={config.schedule[day.key]?.open || "07:00"}

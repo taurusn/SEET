@@ -6,7 +6,8 @@ import { api } from "@/lib/api";
 import type { SSEEvent } from "@/lib/sse";
 import { ConversationList } from "@/components/conversation-list";
 import { ConversationThread } from "@/components/conversation-thread";
-import { MessageSquare, XCircle, Search, Download } from "lucide-react";
+import { MessageSquare, XCircle, Search, Download, ArrowRight } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface Conversation {
   id: string;
@@ -56,7 +57,8 @@ export default function ConversationsPage() {
       .get<Conversation[]>(`/api/v1/shop/conversations?${params}`)
       .then((data) => {
         setConversations(data);
-        if (data.length > 0 && !selectedIdRef.current) {
+        // Auto-select first conversation only on desktop (md: 768px+)
+        if (data.length > 0 && !selectedIdRef.current && window.innerWidth >= 768) {
           setSelectedId(data[0].id);
         }
       });
@@ -159,8 +161,11 @@ export default function ConversationsPage() {
 
       {/* Split pane */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {/* Conversation list */}
-        <div className="md:col-span-1 bg-card rounded-2xl border border-border shadow-sm overflow-hidden max-h-[70vh] overflow-y-auto">
+        {/* Conversation list — hidden on mobile when a thread is selected */}
+        <div className={cn(
+          "md:col-span-1 bg-card rounded-2xl border border-border shadow-sm overflow-hidden max-h-[70vh] overflow-y-auto",
+          selectedId ? "hidden md:block" : "block"
+        )}>
           {loading ? (
             <div className="flex items-center justify-center py-12">
               <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
@@ -174,19 +179,30 @@ export default function ConversationsPage() {
           )}
         </div>
 
-        {/* Thread */}
-        <div className="md:col-span-2 bg-card rounded-2xl border border-border shadow-sm max-h-[70vh] overflow-y-auto">
+        {/* Thread — hidden on mobile when no thread is selected */}
+        <div className={cn(
+          "md:col-span-2 bg-card rounded-2xl border border-border shadow-sm max-h-[70vh] overflow-y-auto",
+          selectedId ? "block" : "hidden md:block"
+        )}>
           {selectedId ? (
             <div>
               <div className="p-4 border-b border-border">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-medium">
+                {/* Mobile back button */}
+                <button
+                  onClick={() => setSelectedId(null)}
+                  className="md:hidden flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-2 -mt-1"
+                >
+                  <ArrowRight className="w-4 h-4" />
+                  العودة للقائمة
+                </button>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-sm font-medium truncate">
                         {customerProfile?.display_name || conversations.find((c) => c.id === selectedId)?.customer_id}
                       </p>
                       {customerProfile && customerProfile.total_conversations > 1 && (
-                        <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-primary/10 text-primary">
+                        <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-primary/10 text-primary whitespace-nowrap">
                           عميل عائد ({customerProfile.total_conversations} محادثات)
                         </span>
                       )}
@@ -200,7 +216,7 @@ export default function ConversationsPage() {
                           : "واتساب"}
                     </p>
                   </div>
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1 flex-shrink-0">
                     <button
                       onClick={async () => {
                         try {
@@ -221,7 +237,7 @@ export default function ConversationsPage() {
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
                     >
                       <Download className="w-3.5 h-3.5" />
-                      تصدير
+                      <span className="hidden sm:inline">تصدير</span>
                     </button>
                     {conversations.find((c) => c.id === selectedId)?.status !== "closed" && (
                       <button
@@ -235,7 +251,7 @@ export default function ConversationsPage() {
                         className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground hover:text-danger hover:bg-danger/10 transition-colors"
                       >
                         <XCircle className="w-3.5 h-3.5" />
-                        إغلاق
+                        <span className="hidden sm:inline">إغلاق</span>
                       </button>
                     )}
                   </div>

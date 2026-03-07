@@ -24,7 +24,7 @@ class RedisClient:
         self._client = redis.from_url(
             settings.redis_url,
             decode_responses=True,
-            max_connections=20,
+            max_connections=100,
         )
         await self._client.ping()
         logger.info("Redis connected")

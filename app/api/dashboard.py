@@ -874,6 +874,19 @@ async def playground_chat(
         history=history,
     )
 
+    # Store sentiment on conversation
+    if result.sentiment:
+        convo.sentiment = result.sentiment
+
+    # Track analytics in Redis (same as message_worker)
+    await redis_client.track_message_processed(
+        shop_id=str(shop.id),
+        response_time_ms=result.response_time_ms,
+        was_escalated=result.handoff_needed,
+        sentiment=result.sentiment,
+        hour=datetime.now(timezone.utc).hour,
+    )
+
     handoff_detected = result.handoff_needed
     if handoff_detected:
         reply_text = HANDOFF_REPLY
