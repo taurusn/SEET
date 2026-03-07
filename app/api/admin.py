@@ -44,7 +44,7 @@ from app.api.admin_auth import (
 from app.services.encryption import encrypt_token
 from app.services.redis_client import redis_client
 from app.services.storage import upload_logo, delete_logo
-from app.services.export import messages_to_transcript, messages_to_csv, analytics_to_csv
+from app.services.export import messages_to_csv, analytics_to_csv
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 
