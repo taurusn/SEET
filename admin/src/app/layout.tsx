@@ -5,6 +5,10 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "SEET Admin",
   description: "SEET Admin Portal — Shop management & onboarding",
+  icons: {
+    icon: "/admin/seet-s.png",
+    apple: "/admin/seet-s.png",
+  },
 };
 
 export default function RootLayout({
