@@ -136,7 +136,7 @@ function MockDashboard({ type }: { type: string }) {
           <span className="text-gray-500">الرسائل اليومية</span>
           <span className="text-teal-600 font-medium">+٢٣٪</span>
         </div>
-        <div className="flex items-end gap-2 h-24">
+        <div className="flex items-end gap-2">
           {[
             { h: 40, v: "٣٢" },
             { h: 65, v: "٥٤" },
@@ -150,7 +150,7 @@ function MockDashboard({ type }: { type: string }) {
               <span className="text-[8px] text-gray-400">{bar.v}</span>
               <div
                 className="w-full rounded-t-sm bg-teal-600"
-                style={{ height: `${bar.h}%` }}
+                style={{ height: `${Math.round(bar.h * 0.8)}px` }}
               />
               <span className="text-gray-400 text-[8px]">
                 {["سبت", "أحد", "اثن", "ثلا", "أرب", "خمي", "جمع"][i]}
