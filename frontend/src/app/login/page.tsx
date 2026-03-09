@@ -26,53 +26,53 @@ const slides = [
   },
 ];
 
-/* ── Mock dashboard screenshot ── */
+/* ── Mock dashboard screenshot (light theme) ── */
 function MockDashboard({ type }: { type: string }) {
   if (type === "dashboard") {
     return (
-      <div className="p-4 space-y-4 text-[11px]" dir="rtl">
+      <div className="p-4 space-y-3 text-[11px] bg-[#f8fafa] h-full" dir="rtl">
         {/* Stats row */}
         <div className="grid grid-cols-4 gap-2">
           {[
-            { label: "المحادثات", value: "١٢٤", color: "bg-teal-500/20 text-teal-300" },
-            { label: "الرسائل", value: "٢,٤٨٠", color: "bg-blue-500/20 text-blue-300" },
-            { label: "التحويلات", value: "٨", color: "bg-amber-500/20 text-amber-300" },
-            { label: "القسائم", value: "٣٢", color: "bg-purple-500/20 text-purple-300" },
+            { label: "المحادثات", value: "١٢٤", color: "bg-teal-50 text-teal-700" },
+            { label: "الرسائل", value: "٢,٤٨٠", color: "bg-blue-50 text-blue-700" },
+            { label: "التحويلات", value: "٨", color: "bg-amber-50 text-amber-700" },
+            { label: "القسائم", value: "٣٢", color: "bg-purple-50 text-purple-700" },
           ].map((s) => (
-            <div key={s.label} className="bg-white/5 rounded-lg p-2.5 text-center">
+            <div key={s.label} className={`${s.color.split(" ")[0]} rounded-lg p-2.5 text-center border border-gray-100`}>
               <div className={`text-base font-bold ${s.color.split(" ")[1]}`}>{s.value}</div>
-              <div className="text-white/40 mt-0.5">{s.label}</div>
+              <div className="text-gray-400 mt-0.5">{s.label}</div>
             </div>
           ))}
         </div>
         {/* AI performance */}
-        <div className="bg-white/5 rounded-lg p-3">
-          <div className="text-white/60 mb-2 font-medium">أداء الذكاء الاصطناعي</div>
+        <div className="bg-white rounded-lg p-3 border border-gray-100">
+          <div className="text-gray-600 mb-2 font-medium">أداء الذكاء الاصطناعي</div>
           <div className="flex items-center gap-3">
             <div className="relative w-14 h-14">
               <svg viewBox="0 0 36 36" className="w-14 h-14 -rotate-90">
-                <circle cx="18" cy="18" r="14" fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="3" />
-                <circle cx="18" cy="18" r="14" fill="none" stroke="#2dd4bf" strokeWidth="3" strokeDasharray="79.6 88" strokeLinecap="round" />
+                <circle cx="18" cy="18" r="14" fill="none" stroke="#e5e7eb" strokeWidth="3" />
+                <circle cx="18" cy="18" r="14" fill="none" stroke="#115e59" strokeWidth="3" strokeDasharray="79.6 88" strokeLinecap="round" />
               </svg>
-              <span className="absolute inset-0 flex items-center justify-center text-accent font-bold text-xs">٩٠٪</span>
+              <span className="absolute inset-0 flex items-center justify-center text-teal-800 font-bold text-xs">٩٠٪</span>
             </div>
             <div className="flex-1 space-y-1.5">
-              <div className="flex justify-between"><span className="text-white/40">نسبة الرد الآلي</span><span className="text-accent">٩٠٪</span></div>
-              <div className="flex justify-between"><span className="text-white/40">متوسط وقت الرد</span><span className="text-white/70">١.٢ ثانية</span></div>
+              <div className="flex justify-between"><span className="text-gray-400">نسبة الرد الآلي</span><span className="text-teal-700 font-medium">٩٠٪</span></div>
+              <div className="flex justify-between"><span className="text-gray-400">متوسط وقت الرد</span><span className="text-gray-600">١.٢ ثانية</span></div>
             </div>
           </div>
         </div>
         {/* Recent conversations */}
-        <div className="bg-white/5 rounded-lg p-3">
-          <div className="text-white/60 mb-2 font-medium">آخر المحادثات</div>
+        <div className="bg-white rounded-lg p-3 border border-gray-100">
+          <div className="text-gray-600 mb-2 font-medium">آخر المحادثات</div>
           <div className="space-y-1.5">
             {["أحمد - انستقرام", "سارة - واتساب", "محمد - انستقرام"].map((c, i) => (
-              <div key={i} className="flex items-center justify-between py-1.5 border-b border-white/5 last:border-0">
+              <div key={i} className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0">
                 <div className="flex items-center gap-2">
-                  <div className="w-5 h-5 rounded-full bg-white/10 flex items-center justify-center text-[9px] text-white/60">{c[0]}</div>
-                  <span className="text-white/70">{c}</span>
+                  <div className="w-5 h-5 rounded-full bg-gray-100 flex items-center justify-center text-[9px] text-gray-500">{c[0]}</div>
+                  <span className="text-gray-600">{c}</span>
                 </div>
-                <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${i === 1 ? "bg-amber-500/20 text-amber-300" : "bg-teal-500/20 text-teal-300"}`}>
+                <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${i === 1 ? "bg-amber-50 text-amber-600" : "bg-teal-50 text-teal-600"}`}>
                   {i === 1 ? "محوّل" : "نشط"}
                 </span>
               </div>
@@ -85,41 +85,41 @@ function MockDashboard({ type }: { type: string }) {
 
   if (type === "conversations") {
     return (
-      <div className="flex h-full text-[11px]" dir="rtl">
+      <div className="flex h-full text-[11px] bg-[#f8fafa]" dir="rtl">
         {/* Conversation list */}
-        <div className="w-[40%] border-l border-white/10 p-2.5 space-y-1.5">
+        <div className="w-[40%] border-l border-gray-200 bg-white p-2.5 space-y-1.5">
           {[
             { name: "أحمد العلي", msg: "كم سعر القهوة المختصة؟", time: "٢ د", active: true },
             { name: "سارة محمد", msg: "هل عندكم توصيل؟", time: "١٥ د", active: false },
             { name: "خالد الحربي", msg: "أبي أحجز طاولة", time: "٣٠ د", active: false },
             { name: "نورة أحمد", msg: "شكراً لكم!", time: "١ س", active: false },
           ].map((c, i) => (
-            <div key={i} className={`p-2 rounded-lg ${c.active ? "bg-white/10" : "hover:bg-white/5"} cursor-pointer`}>
+            <div key={i} className={`p-2 rounded-lg ${c.active ? "bg-teal-50" : "hover:bg-gray-50"} cursor-pointer`}>
               <div className="flex items-center gap-2">
-                <div className="w-6 h-6 rounded-full bg-white/10 flex items-center justify-center text-[9px] text-white/60 shrink-0">{c.name[0]}</div>
+                <div className="w-6 h-6 rounded-full bg-gray-100 flex items-center justify-center text-[9px] text-gray-500 shrink-0">{c.name[0]}</div>
                 <div className="min-w-0 flex-1">
                   <div className="flex justify-between items-center">
-                    <span className="text-white/90 font-medium truncate">{c.name}</span>
-                    <span className="text-white/30 text-[9px] shrink-0">{c.time}</span>
+                    <span className="text-gray-800 font-medium truncate">{c.name}</span>
+                    <span className="text-gray-300 text-[9px] shrink-0">{c.time}</span>
                   </div>
-                  <p className="text-white/40 truncate">{c.msg}</p>
+                  <p className="text-gray-400 truncate">{c.msg}</p>
                 </div>
               </div>
             </div>
           ))}
         </div>
         {/* Chat thread */}
-        <div className="flex-1 flex flex-col p-3">
-          <div className="text-white/70 font-medium mb-3 pb-2 border-b border-white/10">أحمد العلي — انستقرام</div>
+        <div className="flex-1 flex flex-col p-3 bg-[#f8fafa]">
+          <div className="text-gray-600 font-medium mb-3 pb-2 border-b border-gray-200">أحمد العلي — انستقرام</div>
           <div className="flex-1 space-y-2">
-            <div className="flex justify-start"><div className="bg-white/10 rounded-xl rounded-tr-sm px-3 py-1.5 max-w-[80%] text-white/80">كم سعر القهوة المختصة؟</div></div>
-            <div className="flex justify-end"><div className="bg-teal-600/40 rounded-xl rounded-tl-sm px-3 py-1.5 max-w-[80%] text-white/90">أهلاً أحمد! قهوتنا المختصة تبدأ من ٢٥ ريال ☕</div></div>
-            <div className="flex justify-start"><div className="bg-white/10 rounded-xl rounded-tr-sm px-3 py-1.5 max-w-[80%] text-white/80">وش الأنواع اللي عندكم؟</div></div>
-            <div className="flex justify-end"><div className="bg-teal-600/40 rounded-xl rounded-tl-sm px-3 py-1.5 max-w-[80%] text-white/90">عندنا V60 وكيمكس وإيروبرس 🤩</div></div>
+            <div className="flex justify-start"><div className="bg-white border border-gray-100 rounded-xl rounded-tr-sm px-3 py-1.5 max-w-[80%] text-gray-700">كم سعر القهوة المختصة؟</div></div>
+            <div className="flex justify-end"><div className="bg-teal-700 rounded-xl rounded-tl-sm px-3 py-1.5 max-w-[80%] text-white">أهلاً أحمد! قهوتنا المختصة تبدأ من ٢٥ ريال ☕</div></div>
+            <div className="flex justify-start"><div className="bg-white border border-gray-100 rounded-xl rounded-tr-sm px-3 py-1.5 max-w-[80%] text-gray-700">وش الأنواع اللي عندكم؟</div></div>
+            <div className="flex justify-end"><div className="bg-teal-700 rounded-xl rounded-tl-sm px-3 py-1.5 max-w-[80%] text-white">عندنا V60 وكيمكس وإيروبرس 🤩</div></div>
           </div>
-          <div className="flex items-center gap-2 mt-2 pt-2 border-t border-white/10">
-            <div className="flex-1 bg-white/5 rounded-lg px-3 py-1.5 text-white/30">اكتب رد...</div>
-            <div className="w-6 h-6 bg-teal-600 rounded-lg flex items-center justify-center text-white text-[10px]">↑</div>
+          <div className="flex items-center gap-2 mt-2 pt-2 border-t border-gray-200">
+            <div className="flex-1 bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-gray-300">اكتب رد...</div>
+            <div className="w-6 h-6 bg-teal-700 rounded-lg flex items-center justify-center text-white text-[10px]">↑</div>
           </div>
         </div>
       </div>
@@ -128,51 +128,65 @@ function MockDashboard({ type }: { type: string }) {
 
   // Analytics
   return (
-    <div className="p-4 space-y-4 text-[11px]" dir="rtl">
-      <div className="text-white/60 font-medium">تحليلات آخر ٧ أيام</div>
-      {/* Chart mock */}
-      <div className="bg-white/5 rounded-lg p-3">
-        <div className="flex justify-between mb-2">
-          <span className="text-white/50">الرسائل اليومية</span>
-          <span className="text-accent font-medium">+٢٣٪</span>
+    <div className="p-4 space-y-3 text-[11px] bg-[#f8fafa] h-full" dir="rtl">
+      <div className="text-gray-600 font-medium">تحليلات آخر ٧ أيام</div>
+      {/* Chart */}
+      <div className="bg-white rounded-lg p-3 border border-gray-100">
+        <div className="flex justify-between mb-3">
+          <span className="text-gray-500">الرسائل اليومية</span>
+          <span className="text-teal-600 font-medium">+٢٣٪</span>
         </div>
-        <div className="flex items-end gap-1.5 h-20">
-          {[40, 65, 45, 80, 60, 90, 75].map((h, i) => (
+        <div className="flex items-end gap-2 h-24">
+          {[
+            { h: 40, v: "٣٢" },
+            { h: 65, v: "٥٤" },
+            { h: 45, v: "٣٨" },
+            { h: 80, v: "٦٧" },
+            { h: 60, v: "٥٠" },
+            { h: 90, v: "٧٥" },
+            { h: 75, v: "٦٣" },
+          ].map((bar, i) => (
             <div key={i} className="flex-1 flex flex-col items-center gap-1">
-              <div className="w-full rounded-sm bg-accent/40" style={{ height: `${h}%` }} />
-              <span className="text-white/30 text-[8px]">{["سبت", "أحد", "اثن", "ثلا", "أرب", "خمي", "جمع"][i]}</span>
+              <span className="text-[8px] text-gray-400">{bar.v}</span>
+              <div
+                className="w-full rounded-t-sm bg-teal-600"
+                style={{ height: `${bar.h}%` }}
+              />
+              <span className="text-gray-400 text-[8px]">
+                {["سبت", "أحد", "اثن", "ثلا", "أرب", "خمي", "جمع"][i]}
+              </span>
             </div>
           ))}
         </div>
       </div>
       {/* Sentiment */}
-      <div className="bg-white/5 rounded-lg p-3">
-        <div className="text-white/50 mb-2">رضا العملاء</div>
+      <div className="bg-white rounded-lg p-3 border border-gray-100">
+        <div className="text-gray-500 mb-2">رضا العملاء</div>
         <div className="space-y-2">
           {[
-            { label: "إيجابي", pct: 72, color: "bg-green-400" },
+            { label: "إيجابي", pct: 72, color: "bg-green-500" },
             { label: "محايد", pct: 20, color: "bg-gray-400" },
-            { label: "سلبي", pct: 8, color: "bg-red-400" },
+            { label: "سلبي", pct: 8, color: "bg-red-500" },
           ].map((s) => (
             <div key={s.label} className="flex items-center gap-2">
-              <span className="text-white/50 w-10">{s.label}</span>
-              <div className="flex-1 h-2 bg-white/10 rounded-full overflow-hidden">
+              <span className="text-gray-500 w-10">{s.label}</span>
+              <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
                 <div className={`h-full ${s.color} rounded-full`} style={{ width: `${s.pct}%` }} />
               </div>
-              <span className="text-white/60 w-8 text-left">{s.pct}٪</span>
+              <span className="text-gray-500 w-8 text-left">{s.pct}٪</span>
             </div>
           ))}
         </div>
       </div>
       {/* Top metrics */}
       <div className="grid grid-cols-2 gap-2">
-        <div className="bg-white/5 rounded-lg p-2.5 text-center">
-          <div className="text-accent font-bold text-lg">١.٢ ث</div>
-          <div className="text-white/40">متوسط الرد</div>
+        <div className="bg-white rounded-lg p-2.5 text-center border border-gray-100">
+          <div className="text-teal-700 font-bold text-lg">١.٢ ث</div>
+          <div className="text-gray-400">متوسط الرد</div>
         </div>
-        <div className="bg-white/5 rounded-lg p-2.5 text-center">
-          <div className="text-blue-300 font-bold text-lg">٩٤٪</div>
-          <div className="text-white/40">دقة الذكاء</div>
+        <div className="bg-white rounded-lg p-2.5 text-center border border-gray-100">
+          <div className="text-blue-600 font-bold text-lg">٩٤٪</div>
+          <div className="text-gray-400">دقة الذكاء</div>
         </div>
       </div>
     </div>
@@ -182,15 +196,15 @@ function MockDashboard({ type }: { type: string }) {
 /* ── Browser frame wrapper ── */
 function BrowserFrame({ children }: { children: React.ReactNode }) {
   return (
-    <div className="rounded-xl overflow-hidden border border-white/10 bg-[#0d1f1f] shadow-2xl">
+    <div className="rounded-xl overflow-hidden border border-white/10 bg-white shadow-2xl">
       {/* Title bar */}
-      <div className="flex items-center gap-1.5 px-3 py-2 bg-white/5 border-b border-white/10">
-        <div className="w-2.5 h-2.5 rounded-full bg-red-400/60" />
-        <div className="w-2.5 h-2.5 rounded-full bg-yellow-400/60" />
-        <div className="w-2.5 h-2.5 rounded-full bg-green-400/60" />
+      <div className="flex items-center gap-1.5 px-3 py-2 bg-gray-50 border-b border-gray-200">
+        <div className="w-2.5 h-2.5 rounded-full bg-red-400" />
+        <div className="w-2.5 h-2.5 rounded-full bg-yellow-400" />
+        <div className="w-2.5 h-2.5 rounded-full bg-green-400" />
         <div className="flex-1 mx-3">
-          <div className="bg-white/5 rounded-md px-3 py-0.5 text-[10px] text-white/30 text-center max-w-[200px] mx-auto">
-            app.seet.sa
+          <div className="bg-white border border-gray-200 rounded-md px-3 py-0.5 text-[10px] text-gray-400 text-center max-w-[200px] mx-auto">
+            seet.cloud
           </div>
         </div>
       </div>
@@ -328,10 +342,10 @@ export default function LoginPage() {
           </div>
 
           <h1 className="text-2xl font-bold text-foreground mb-1">
-            مرحبًا بك مجددًا 👋
+            هلابك 👋
           </h1>
           <p className="text-muted-foreground mb-8">
-            سجل دخولك لإدارة محلك
+            سجل دخولك واسمع من زباينك
           </p>
 
           <form onSubmit={handleSubmit} className="space-y-5">
