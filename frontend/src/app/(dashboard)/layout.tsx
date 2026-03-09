@@ -106,11 +106,11 @@ export default function DashboardLayout({
             />
           ) : (
             <Image
-              src="/seet-logo.png"
+              src="/seet-s.png"
               alt="SEET"
-              width={160}
-              height={160}
-              className="w-28"
+              width={40}
+              height={40}
+              className="h-10 w-10"
               priority
             />
           )}
