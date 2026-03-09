@@ -341,8 +341,9 @@ export default function LoginPage() {
             />
           </div>
 
-          <h1 className="text-2xl font-bold text-foreground mb-1">
-            هلابك 👋🏻
+          <h1 className="text-2xl font-bold text-foreground mb-1 flex items-center gap-2">
+            هلابك
+            <img src="/wave.svg" alt="👋" className="w-8 h-8 inline-block" />
           </h1>
           <p className="text-muted-foreground mb-8">
             سجل دخولك واسمع من زباينك
