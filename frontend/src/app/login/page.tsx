@@ -342,7 +342,7 @@ export default function LoginPage() {
           </div>
 
           <h1 className="text-2xl font-bold text-foreground mb-1">
-            هلابك 👋
+            هلابك 👋🏻
           </h1>
           <p className="text-muted-foreground mb-8">
             سجل دخولك واسمع من زباينك
