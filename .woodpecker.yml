@@ -16,6 +16,7 @@ steps:
       - git reset --hard FETCH_HEAD
       - docker compose -p seet up --build -d || true
       - sleep 5
+      - docker compose -p seet exec -T api alembic upgrade head || true
       - docker compose -p seet ps
       - docker image prune -f
 
