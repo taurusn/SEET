@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 HANDOFF_REPLY = "أبشر، خلني أتواصل مع المسؤول ويرد عليك"
 
-VISIT_GAP_HOURS = 0.03  # TEMPORARY: ~2 minutes for testing (normally 24)
+VISIT_GAP_HOURS = 24  # hours of inactivity before a new visit is detected
 
 
 async def detect_and_snapshot_visit(
