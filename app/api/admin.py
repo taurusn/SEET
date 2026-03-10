@@ -22,6 +22,8 @@ from app.models.schemas import (
     Message,
     HandoffRequest,
     Voucher,
+    ConversationVisit,
+    ConversationVisitResponse,
     AdminCreate,
     AdminLogin,
     AdminPasswordChange,
@@ -643,7 +645,6 @@ async def list_shop_conversations_admin(
             "platform": c.platform,
             "customer_id": c.customer_id,
             "status": c.status,
-            "sentiment": c.current_sentiment,  # backward compat
             "initial_sentiment": c.initial_sentiment,
             "current_sentiment": c.current_sentiment,
             "created_at": c.created_at.isoformat() if c.created_at else None,
@@ -685,6 +686,35 @@ async def get_conversation_messages_admin(
         }
         for m in messages
     ]
+
+
+@router.get(
+    "/shops/{shop_id}/conversations/{conversation_id}/visits",
+    response_model=list[ConversationVisitResponse],
+)
+async def get_conversation_visits_admin(
+    shop_id: uuid.UUID,
+    conversation_id: uuid.UUID,
+    admin: Admin = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get visit history for a conversation (admin audit view)."""
+    convo = await db.execute(
+        select(Conversation).where(
+            Conversation.id == conversation_id,
+            Conversation.shop_id == shop_id,
+        )
+    )
+    if not convo.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    stmt = (
+        select(ConversationVisit)
+        .where(ConversationVisit.conversation_id == conversation_id)
+        .order_by(ConversationVisit.visit_number.desc())
+    )
+    result = await db.execute(stmt)
+    return result.scalars().all()
 
 
 # ─── Shop Data Export (A-39) ──────────────────────────────────────────────

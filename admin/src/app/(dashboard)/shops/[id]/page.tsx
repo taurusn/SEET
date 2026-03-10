@@ -55,7 +55,6 @@ interface ConvoItem {
   platform: string;
   customer_id: string;
   status: string;
-  sentiment?: string | null;
   initial_sentiment?: string | null;
   current_sentiment?: string | null;
   created_at: string;
@@ -67,6 +66,16 @@ interface MessageItem {
   sender_type: string;
   content: string;
   created_at: string;
+}
+
+interface VisitItem {
+  id: string;
+  visit_number: number;
+  initial_sentiment?: string | null;
+  current_sentiment?: string | null;
+  message_count: number;
+  started_at: string;
+  ended_at?: string | null;
 }
 
 const periods = [
@@ -103,6 +112,7 @@ export default function ShopDetailPage() {
   selectedConvoIdRef.current = selectedConvoId;
   const [messages, setMessages] = useState<MessageItem[]>([]);
   const [messagesLoading, setMessagesLoading] = useState(false);
+  const [visits, setVisits] = useState<VisitItem[]>([]);
 
   const loadShop = useCallback(async () => {
     try {
@@ -168,6 +178,10 @@ export default function ShopDetailPage() {
         .then(setMessages)
         .catch(() => setMessages([]))
         .finally(() => setMessagesLoading(false));
+      api
+        .get<VisitItem[]>(`/api/v1/admin/shops/${id}/conversations/${selectedConvoId}/visits`)
+        .then(setVisits)
+        .catch(() => setVisits([]));
     }
   }, [id, selectedConvoId, tab]);
 
@@ -649,6 +663,33 @@ export default function ShopDetailPage() {
               <p className="text-sm text-muted-foreground text-center py-12">No messages</p>
             ) : (
               <div className="p-4 space-y-3">
+                {visits.length > 0 && (
+                  <details className="mb-3 group">
+                    <summary className="text-xs font-medium text-muted-foreground cursor-pointer hover:text-foreground">
+                      Visit History ({visits.length} past visits)
+                    </summary>
+                    <div className="mt-2 space-y-1">
+                      {visits.map((v) => {
+                        const resolved = v.initial_sentiment === "negative" && v.current_sentiment === "positive";
+                        const worsened = v.initial_sentiment === "positive" && v.current_sentiment === "negative";
+                        return (
+                          <div key={v.id} className="flex items-center gap-2 text-xs bg-muted/50 rounded px-2 py-1">
+                            <span className="font-medium">Visit {v.visit_number}</span>
+                            <span className="text-muted-foreground">{v.started_at?.slice(0, 10)}</span>
+                            <span className="text-muted-foreground">({v.message_count} msgs)</span>
+                            {v.initial_sentiment && v.current_sentiment && (
+                              <span>
+                                {v.initial_sentiment} → {v.current_sentiment}
+                                {resolved && <span className="text-success ml-1">✓</span>}
+                                {worsened && <span className="text-danger ml-1">✗</span>}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </details>
+                )}
                 {messages.map((m) => (
                   <div
                     key={m.id}

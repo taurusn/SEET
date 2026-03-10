@@ -3,7 +3,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 from sqlalchemy import (
     Boolean,
     Column,
@@ -81,9 +81,9 @@ class Conversation(Base):
     platform = Column(String(20), nullable=False)  # 'instagram', 'whatsapp'
     customer_id = Column(String(255), nullable=False)
     status = Column(String(20), default="ai")  # 'ai', 'human', 'closed'
-    sentiment = Column(String(20), nullable=True)  # deprecated — kept for migration transition
     initial_sentiment = Column(String(20), nullable=True)  # customer's mood when they first reached out
     current_sentiment = Column(String(20), nullable=True)  # customer's mood now
+    current_visit_started_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
@@ -93,6 +93,24 @@ class Conversation(Base):
     shop = relationship("Shop", back_populates="conversations")
     messages = relationship("Message", back_populates="conversation", lazy="select")
     handoff_requests = relationship("HandoffRequest", back_populates="conversation", lazy="select")
+    visits = relationship("ConversationVisit", back_populates="conversation", lazy="select")
+
+
+class ConversationVisit(Base):
+    __tablename__ = "conversation_visits"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    conversation_id = Column(UUID(as_uuid=True), ForeignKey("conversations.id"), nullable=False)
+    shop_id = Column(UUID(as_uuid=True), ForeignKey("shops.id"), nullable=False)
+    visit_number = Column(Integer, nullable=False, default=1)
+    initial_sentiment = Column(String(20), nullable=True)
+    current_sentiment = Column(String(20), nullable=True)
+    message_count = Column(Integer, nullable=False, default=0)
+    started_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    ended_at = Column(DateTime(timezone=True), nullable=True)
+
+    conversation = relationship("Conversation", back_populates="visits")
+    shop = relationship("Shop")
 
 
 class CustomerProfile(Base):
@@ -273,19 +291,25 @@ class ConversationResponse(BaseModel):
     platform: str
     customer_id: str
     status: str
-    sentiment: Optional[str] = None  # deprecated alias for current_sentiment
     initial_sentiment: Optional[str] = None
     current_sentiment: Optional[str] = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
 
-    @model_validator(mode="after")
-    def backfill_sentiment_alias(self) -> "ConversationResponse":
-        """Ensure deprecated `sentiment` field mirrors current_sentiment for backward compat."""
-        if self.sentiment is None and self.current_sentiment is not None:
-            self.sentiment = self.current_sentiment
-        return self
+
+class ConversationVisitResponse(BaseModel):
+    id: uuid.UUID
+    conversation_id: uuid.UUID
+    shop_id: uuid.UUID
+    visit_number: int
+    initial_sentiment: Optional[str] = None
+    current_sentiment: Optional[str] = None
+    message_count: int
+    started_at: datetime
+    ended_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
 
 
 class MessageResponse(BaseModel):

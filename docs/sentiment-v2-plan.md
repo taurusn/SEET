@@ -2,9 +2,8 @@
 
 ## Status
 
-**Phases 1-9: BUILT & COMMITTED** (commit `11a9613`)
-**Phase 10: Cleanup** — future PR (drop old `sentiment` column)
-**Phase 11: Visit-Based Sessions** — NOT YET BUILT (see below)
+**Phases 1-9: COMMITTED** (commit `11a9613`)
+**Phases 10-11: COMMITTED** (cleanup + visit-based sessions)
 
 ---
 
@@ -115,16 +114,17 @@ locked_initial = convo.initial_sentiment if inbound_count > 3 else ""
 
 ---
 
-## Phase 10: Cleanup (Separate PR, After Stable)
+## Phase 10: Cleanup — DONE
 
-- Migration `007`: drop `sentiment` column from `conversations`
-- Remove `sentiment` field from `ConversationResponse`
-- Remove backward compat `"sentiment"` key from admin audit endpoint
-- Remove `model_validator` from `ConversationResponse`
+- Migration `007`: dropped `sentiment` column from `conversations`
+- Removed `sentiment` field from `ConversationResponse` Pydantic schema
+- Removed backward compat `"sentiment"` key from admin conversation audit endpoint
+- Removed `model_validator` from `ConversationResponse`
+- Removed `sentiment` from all frontend interfaces (`conversation-list.tsx`, `conversations/page.tsx`, admin `shops/[id]/page.tsx`)
 
 ---
 
-## Phase 11: Visit-Based Sentiment Sessions (NOT YET BUILT)
+## Phase 11: Visit-Based Sentiment Sessions — DONE
 
 ### Problem
 
@@ -367,8 +367,8 @@ INFO  ai_pipeline: Classifier filtered to current visit: 3 inbound messages (vis
 | 7 | ✅ DONE | Backend API: schemas, admin audit, backward compat |
 | 8 | ✅ DONE | Frontend shop owner: dot, tooltip, transition badge, resolution card |
 | 9 | ✅ DONE | Frontend admin: interfaces, resolution card |
-| 10 | ⏳ LATER | Cleanup: drop old sentiment column (separate PR) |
-| 11 | ⏳ TODO | Visit-based sessions: visits table, gap detection, classifier filtering, visit history UI |
+| 10 | ✅ DONE | Cleanup: drop old sentiment column (migration 007) |
+| 11 | ✅ DONE | Visit-based sessions: visits table, gap detection, classifier filtering, visit history UI (migration 008) |
 
 ### Key Design Decisions
 

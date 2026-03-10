@@ -12,11 +12,11 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, func as sa_func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.database import async_session_factory
-from app.models.schemas import Shop, ShopContext, Conversation, Message
+from app.models.schemas import Shop, ShopContext, Conversation, Message, ConversationVisit
 from app.queue.rabbitmq import rabbitmq, INBOUND_QUEUE, OUTBOUND_QUEUE
 from app.services.redis_client import redis_client
 from app.services.ai_pipeline import ai_pipeline
@@ -31,6 +31,88 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 HANDOFF_REPLY = "أبشر، خلني أتواصل مع المسؤول ويرد عليك"
+
+VISIT_GAP_HOURS = 24  # hours of inactivity before a new visit is detected
+
+
+async def detect_and_snapshot_visit(
+    db: AsyncSession, convo: Conversation
+) -> None:
+    """Check if a new visit should start (>24h gap since last message).
+
+    If so, snapshot the current visit into conversation_visits and reset
+    the conversation's sentiment for the new visit.
+    """
+    # Find the latest message timestamp for this conversation
+    result = await db.execute(
+        select(sa_func.max(Message.created_at)).where(
+            Message.conversation_id == convo.id
+        )
+    )
+    last_msg_at = result.scalar_one_or_none()
+
+    if not last_msg_at:
+        # First ever message — initialize visit start, no snapshot needed
+        if not convo.current_visit_started_at:
+            convo.current_visit_started_at = datetime.now(timezone.utc)
+        return
+
+    now = datetime.now(timezone.utc)
+    gap = now - last_msg_at.replace(tzinfo=timezone.utc) if last_msg_at.tzinfo is None else now - last_msg_at
+
+    if gap.total_seconds() <= VISIT_GAP_HOURS * 3600:
+        # Same visit — no action needed
+        return
+
+    # ── New visit detected — snapshot the old one ──
+
+    # Count messages in the current visit
+    visit_start = convo.current_visit_started_at or convo.created_at
+    msg_count_result = await db.execute(
+        select(sa_func.count()).select_from(Message).where(
+            Message.conversation_id == convo.id,
+            Message.created_at >= visit_start,
+        )
+    )
+    msg_count = msg_count_result.scalar() or 0
+
+    # Determine visit number
+    visit_count_result = await db.execute(
+        select(sa_func.count()).select_from(ConversationVisit).where(
+            ConversationVisit.conversation_id == convo.id
+        )
+    )
+    prev_visits = visit_count_result.scalar() or 0
+
+    # Snapshot the completed visit
+    visit = ConversationVisit(
+        conversation_id=convo.id,
+        shop_id=convo.shop_id,
+        visit_number=prev_visits + 1,
+        initial_sentiment=convo.initial_sentiment,
+        current_sentiment=convo.current_sentiment,
+        message_count=msg_count,
+        started_at=visit_start,
+        ended_at=last_msg_at,
+    )
+    db.add(visit)
+
+    logger.info(
+        "New visit detected for convo=%s (24h+ gap). "
+        "Snapshotting visit #%d (initial=%s, current=%s, %d messages). "
+        "Starting visit #%d.",
+        convo.id,
+        prev_visits + 1,
+        convo.initial_sentiment,
+        convo.current_sentiment,
+        msg_count,
+        prev_visits + 2,
+    )
+
+    # Reset conversation for the new visit
+    convo.initial_sentiment = None
+    convo.current_sentiment = None
+    convo.current_visit_started_at = now
 
 
 async def identify_shop(
@@ -115,7 +197,11 @@ async def get_recent_messages(
     messages = result.scalars().all()
 
     history = [
-        {"direction": m.direction, "content": m.content}
+        {
+            "direction": m.direction,
+            "content": m.content,
+            "created_at": m.created_at.isoformat() if m.created_at else None,
+        }
         for m in reversed(messages)
     ]
 
@@ -167,7 +253,11 @@ async def save_message(
     # Update Redis cache
     await redis_client.append_to_history(
         str(conversation_id),
-        {"direction": direction, "content": content},
+        {
+            "direction": direction,
+            "content": content,
+            "created_at": msg.created_at.isoformat() if msg.created_at else datetime.now(timezone.utc).isoformat(),
+        },
     )
     return msg
 
@@ -220,6 +310,9 @@ async def process_message(msg: dict) -> None:
                 # Get or create conversation
                 convo = await get_or_create_conversation(db, shop.id, platform, customer_id)
 
+                # Visit detection: snapshot old visit + reset sentiment if 24h+ gap
+                await detect_and_snapshot_visit(db, convo)
+
                 # Load history BEFORE saving inbound message to avoid
                 # duplicating the current message in Gemini's context.
                 history = await get_recent_messages(db, convo.id)
@@ -265,6 +358,11 @@ async def process_message(msg: dict) -> None:
                 # Run the AI pipeline — handles prompt composition, parallel
                 # Gemini + sentiment calls, handoff extraction, and timing.
                 context = await get_shop_context(db, shop)
+                visit_start_iso = (
+                    convo.current_visit_started_at.isoformat()
+                    if convo.current_visit_started_at
+                    else None
+                )
                 result = await ai_pipeline.process(
                     context=context,
                     conversation_id=str(convo.id),
@@ -274,10 +372,27 @@ async def process_message(msg: dict) -> None:
                     db=db,
                     shop_id=str(shop.id),
                     platform=platform,
+                    visit_started_at=visit_start_iso,
                 )
 
                 # Store sentiment on conversation (Sentiment V2: dual tracking)
-                inbound_count = len([m for m in history if m.get("direction") == "inbound"]) + 1
+                # Count only current-visit inbound messages for locking threshold
+                visit_start_str = visit_start_iso
+                if visit_start_str:
+                    has_timestamps = any(m.get("created_at") for m in history)
+                    if has_timestamps:
+                        visit_inbound = [
+                            m for m in history
+                            if m.get("direction") == "inbound"
+                            and m.get("created_at")
+                            and m["created_at"] >= visit_start_str
+                        ]
+                        inbound_count = len(visit_inbound) + 1
+                    else:
+                        # Old cache without timestamps — count all as fallback
+                        inbound_count = len([m for m in history if m.get("direction") == "inbound"]) + 1
+                else:
+                    inbound_count = len([m for m in history if m.get("direction") == "inbound"]) + 1
                 if result.initial_sentiment:
                     if not convo.initial_sentiment or inbound_count <= 3:
                         convo.initial_sentiment = result.initial_sentiment

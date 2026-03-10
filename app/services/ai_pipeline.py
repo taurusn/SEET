@@ -122,6 +122,7 @@ class AIPipeline:
         db: AsyncSession | None = None,
         shop_id: str | None = None,
         platform: str | None = None,
+        visit_started_at: str | None = None,
     ) -> PipelineResult:
         """Run the full pipeline: prompt → parallel Gemini calls → post-process.
 
@@ -135,6 +136,7 @@ class AIPipeline:
             db: Optional DB session for customer profile upsert
             shop_id: Shop UUID string (needed for customer profile)
             platform: Platform string (needed for customer profile)
+            visit_started_at: ISO timestamp of current visit start (classifier filtering)
         """
         start = time.monotonic()
 
@@ -162,12 +164,27 @@ class AIPipeline:
         system_prompt = build_modular_prompt(context, customer_info)
         enriched_msg = _enrich_message(text, customer_info)
 
+        # ── Filter history for classifier by current visit ──
+        # Gemini sees full history (remembers customer across visits).
+        # Classifier only sees current visit messages (fresh sentiment).
+        classifier_history = history
+        if visit_started_at:
+            # Only filter if messages actually have timestamps (old cache may not)
+            has_timestamps = any(m.get("created_at") for m in history)
+            if has_timestamps:
+                filtered = [
+                    m for m in history
+                    if m.get("created_at") and m["created_at"] >= visit_started_at
+                ]
+                if filtered:
+                    classifier_history = filtered
+
         # ── PARALLEL: Main Gemini + Conversation-aware sentiment classifier ──
         raw_reply, sentiment_result = await asyncio.gather(
             gemini_service.generate_reply(
                 system_prompt, history, enriched_msg, conversation_id
             ),
-            classify_sentiment(history, text),
+            classify_sentiment(classifier_history, text),
         )
 
         # ── Post-processors ──

@@ -14,7 +14,6 @@ interface Conversation {
   platform: string;
   customer_id: string;
   status: string;
-  sentiment?: string | null;
   initial_sentiment?: string | null;
   current_sentiment?: string | null;
   created_at: string;
@@ -25,6 +24,16 @@ interface CustomerProfile {
   notes?: string | null;
   total_conversations: number;
   first_seen_at: string;
+}
+
+interface Visit {
+  id: string;
+  visit_number: number;
+  initial_sentiment?: string | null;
+  current_sentiment?: string | null;
+  message_count: number;
+  started_at: string;
+  ended_at?: string | null;
 }
 
 export default function ConversationsPage() {
@@ -39,6 +48,7 @@ export default function ConversationsPage() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [customerNotes, setCustomerNotes] = useState("");
   const [notesSaved, setNotesSaved] = useState(false);
+  const [visits, setVisits] = useState<Visit[]>([]);
   const selectedIdRef = useRef(selectedId);
   selectedIdRef.current = selectedId;
 
@@ -102,6 +112,7 @@ export default function ConversationsPage() {
     if (!selectedId) {
       setCustomerProfile(null);
       setCustomerNotes("");
+      setVisits([]);
       return;
     }
     const convo = conversations.find((c) => c.id === selectedId);
@@ -120,6 +131,11 @@ export default function ConversationsPage() {
       setCustomerProfile(null);
       setCustomerNotes("");
     }
+    // Fetch visit history
+    api
+      .get<Visit[]>(`/api/v1/shop/conversations/${selectedId}/visits`)
+      .then(setVisits)
+      .catch(() => setVisits([]));
   }, [selectedId]);
 
   return (
@@ -293,6 +309,39 @@ export default function ConversationsPage() {
                       rows={2}
                     />
                     {notesSaved && <p className="text-[10px] text-success mt-0.5">تم الحفظ</p>}
+                  </div>
+                )}
+                {/* Visit History (Phase 11) */}
+                {visits.length > 0 && (
+                  <div className="pb-3">
+                    <details className="group">
+                      <summary className="text-xs font-medium text-muted-foreground cursor-pointer hover:text-foreground transition-colors">
+                        سجل الزيارات ({visits.length} زيارة سابقة)
+                      </summary>
+                      <div className="mt-2 space-y-1.5">
+                        {visits.map((v) => {
+                          const colors: Record<string, string> = { positive: "text-green-500", neutral: "text-gray-400", negative: "text-red-500" };
+                          const resolved = v.initial_sentiment === "negative" && v.current_sentiment === "positive";
+                          const worsened = v.initial_sentiment === "positive" && v.current_sentiment === "negative";
+                          return (
+                            <div key={v.id} className="flex items-center gap-2 text-xs bg-muted/50 rounded-lg px-3 py-1.5">
+                              <span className="font-medium">زيارة {v.visit_number}</span>
+                              <span className="text-muted-foreground">{v.started_at.slice(0, 10)}</span>
+                              <span className="text-muted-foreground">({v.message_count} رسائل)</span>
+                              {v.initial_sentiment && v.current_sentiment && (
+                                <span>
+                                  <span className={colors[v.initial_sentiment] || ""}>{v.initial_sentiment}</span>
+                                  {" → "}
+                                  <span className={colors[v.current_sentiment] || ""}>{v.current_sentiment}</span>
+                                  {resolved && " ✓"}
+                                  {worsened && " ✗"}
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </details>
                   </div>
                 )}
               </div>

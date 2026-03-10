@@ -43,13 +43,15 @@ from app.models.schemas import (
     CustomerProfile,
     CustomerProfileResponse,
     CustomerProfileUpdate,
+    ConversationVisit,
+    ConversationVisitResponse,
 )
 from app.services.encryption import encrypt_token
 from app.services.redis_client import redis_client
 from app.services.handoff import resolve_handoff, trigger_handoff
 from app.services.export import messages_to_transcript, messages_to_csv, analytics_to_csv
 from app.services.ai_pipeline import ai_pipeline
-from app.workers.message_worker import get_shop_context, get_recent_messages, save_message, HANDOFF_REPLY
+from app.workers.message_worker import get_shop_context, get_recent_messages, save_message, HANDOFF_REPLY, detect_and_snapshot_visit
 from app.services.voucher import generate_voucher_code, is_voucher_expired
 from app.queue.rabbitmq import rabbitmq, OUTBOUND_QUEUE
 from app.api.auth import (
@@ -845,6 +847,9 @@ async def playground_chat(
     if not convo:
         raise HTTPException(status_code=404, detail="Playground conversation not found")
 
+    # Visit detection: snapshot old visit + reset sentiment if 24h+ gap
+    await detect_and_snapshot_visit(db, convo)
+
     # Respect handoff state in playground
     if convo.status == "human":
         user_msg = await save_message(db, convo.id, "inbound", data.message, "customer")
@@ -866,16 +871,37 @@ async def playground_chat(
     # Run the AI pipeline — handles prompt composition, parallel
     # Gemini + sentiment calls, handoff extraction, and timing.
     context = await get_shop_context(db, shop)
+    visit_start_iso = (
+        convo.current_visit_started_at.isoformat()
+        if convo.current_visit_started_at
+        else None
+    )
     result = await ai_pipeline.process(
         context=context,
         conversation_id=str(convo.id),
         customer_id=convo.customer_id,
         text=data.message,
         history=history,
+        visit_started_at=visit_start_iso,
     )
 
     # Store sentiment on conversation (Sentiment V2: dual tracking)
-    inbound_count = len([m for m in history if m.get("direction") == "inbound"]) + 1
+    # Count only current-visit inbound messages for locking threshold
+    if visit_start_iso:
+        has_timestamps = any(m.get("created_at") for m in history)
+        if has_timestamps:
+            visit_inbound = [
+                m for m in history
+                if m.get("direction") == "inbound"
+                and m.get("created_at")
+                and m["created_at"] >= visit_start_iso
+            ]
+            inbound_count = len(visit_inbound) + 1
+        else:
+            # Old cache without timestamps — count all as fallback
+            inbound_count = len([m for m in history if m.get("direction") == "inbound"]) + 1
+    else:
+        inbound_count = len([m for m in history if m.get("direction") == "inbound"]) + 1
     if result.initial_sentiment:
         if not convo.initial_sentiment or inbound_count <= 3:
             convo.initial_sentiment = result.initial_sentiment
@@ -932,6 +958,7 @@ async def delete_playground_conversation(
         raise HTTPException(status_code=404, detail="Playground conversation not found")
 
     from sqlalchemy import delete as sql_delete
+    await db.execute(sql_delete(ConversationVisit).where(ConversationVisit.conversation_id == conversation_id))
     await db.execute(sql_delete(Message).where(Message.conversation_id == conversation_id))
     await db.delete(convo)
     await db.flush()
@@ -958,6 +985,36 @@ async def get_customer_profile(
     if not profile:
         raise HTTPException(status_code=404, detail="Customer profile not found")
     return profile
+
+
+# ─── Visit History ──────────────────────────────────────────────────────────
+
+
+@router.get(
+    "/shop/conversations/{conversation_id}/visits",
+    response_model=list[ConversationVisitResponse],
+)
+async def get_conversation_visits(
+    conversation_id: uuid.UUID,
+    shop_id: uuid.UUID = Depends(get_current_shop_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get visit history for a conversation (past completed visits)."""
+    convo_stmt = select(Conversation).where(
+        Conversation.id == conversation_id,
+        Conversation.shop_id == shop_id,
+    )
+    convo_result = await db.execute(convo_stmt)
+    if not convo_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    stmt = (
+        select(ConversationVisit)
+        .where(ConversationVisit.conversation_id == conversation_id)
+        .order_by(ConversationVisit.visit_number.desc())
+    )
+    result = await db.execute(stmt)
+    return result.scalars().all()
 
 
 @router.patch("/shop/customers/{platform}/{customer_id}", response_model=CustomerProfileResponse)
