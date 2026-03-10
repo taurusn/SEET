@@ -959,6 +959,7 @@ async def delete_playground_conversation(
 
     from sqlalchemy import delete as sql_delete
     await db.execute(sql_delete(ConversationVisit).where(ConversationVisit.conversation_id == conversation_id))
+    await db.execute(sql_delete(HandoffRequest).where(HandoffRequest.conversation_id == conversation_id))
     await db.execute(sql_delete(Message).where(Message.conversation_id == conversation_id))
     await db.delete(convo)
     await db.flush()
