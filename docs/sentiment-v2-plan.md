@@ -114,242 +114,145 @@ locked_initial = convo.initial_sentiment if inbound_count > 3 else ""
 
 ---
 
-## Phase 10: Cleanup — DONE
+## What Was Built (Phase 10: Cleanup)
 
-- Migration `007`: dropped `sentiment` column from `conversations`
-- Removed `sentiment` field from `ConversationResponse` Pydantic schema
-- Removed backward compat `"sentiment"` key from admin conversation audit endpoint
-- Removed `model_validator` from `ConversationResponse`
-- Removed `sentiment` from all frontend interfaces (`conversation-list.tsx`, `conversations/page.tsx`, admin `shops/[id]/page.tsx`)
+### Changes
+- **Migration 007**: Dropped deprecated `sentiment` column from `conversations` table. Downgrade restores and backfills from `current_sentiment`.
+- **`app/models/schemas.py`**: Removed `sentiment` Column from `Conversation` ORM. Removed `sentiment` field, `model_validator` import, and `backfill_sentiment_alias` validator from `ConversationResponse`.
+- **`app/api/admin.py`**: Removed backward compat `"sentiment"` key from conversation audit endpoint response.
+- **`frontend/src/components/conversation-list.tsx`**: Removed `sentiment` from `Conversation` interface. Sentiment dot uses `current_sentiment` only.
+- **`frontend/src/app/(dashboard)/conversations/page.tsx`**: Removed `sentiment` from `Conversation` interface.
+- **`admin/src/app/(dashboard)/shops/[id]/page.tsx`**: Removed `sentiment` from `ConvoItem` interface.
 
 ---
 
-## Phase 11: Visit-Based Sentiment Sessions — DONE
+## What Was Built (Phase 11: Visit-Based Sentiment Sessions)
 
 ### Problem
+Instagram/WhatsApp DMs are one continuous thread per customer. The system mirrors this: one `Conversation` row per `(shop, platform, customer)`, forever via `UniqueConstraint`. Sentiment from January stays locked when a customer returns in March — stale and meaningless. The classifier sees old messages mixed with new ones.
 
-Instagram/WhatsApp DMs are one continuous thread per customer. The system mirrors this: one `Conversation` row per `(shop, platform, customer)`, forever via `UniqueConstraint`.
+### Solution
+Visit lifecycle with 24-hour gap detection. When a customer returns after 24+ hours of inactivity, the old visit is snapshotted into `conversation_visits` and the conversation's sentiment resets for a fresh start.
 
-This creates a problem for sentiment tracking:
-- Customer complains in January (initial_sentiment = negative, current_sentiment = positive after AI resolves)
-- Customer returns in March with a new question
-- `initial_sentiment` is still locked from January — stale and meaningless
-- The classifier sees old messages from January mixed with new ones
-- Analytics show one conversation, but it's really two separate interactions
+### Database (Migration 008)
 
-The system already partially detects "visits" — `customer_profiles.total_conversations` increments when `last_seen_at` is >24 hours ago. But this doesn't affect the conversation model or sentiment tracking.
+**New table: `conversation_visits`**
+- `id`, `conversation_id` (FK), `shop_id` (FK), `visit_number`, `initial_sentiment`, `current_sentiment`, `message_count`, `started_at`, `ended_at`
+- CHECK constraints on sentiment values (`positive`, `neutral`, `negative`)
+- Indexes: `ix_visits_conversation` (by conversation_id), `ix_visits_shop_started` (by shop_id + started_at DESC)
 
-### Solution: Visit Lifecycle
+**New column on `conversations`**: `current_visit_started_at` (TIMESTAMPTZ, nullable). Backfilled from `created_at` for all existing conversations.
 
-#### New Table: `conversation_visits`
+### Visit Detection (`app/workers/message_worker.py`)
 
-```sql
-CREATE TABLE conversation_visits (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    conversation_id UUID NOT NULL REFERENCES conversations(id),
-    shop_id UUID NOT NULL REFERENCES shops(id),
-    visit_number INTEGER NOT NULL DEFAULT 1,
-    initial_sentiment VARCHAR(20),
-    current_sentiment VARCHAR(20),
-    message_count INTEGER NOT NULL DEFAULT 0,
-    started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    ended_at TIMESTAMPTZ,
-    CONSTRAINT chk_visit_initial CHECK (initial_sentiment IN ('positive', 'neutral', 'negative')),
-    CONSTRAINT chk_visit_current CHECK (current_sentiment IN ('positive', 'neutral', 'negative'))
-);
+New function `detect_and_snapshot_visit(db, convo)` runs before message processing:
+1. Queries `MAX(messages.created_at)` for the conversation
+2. If no messages exist (first ever): sets `current_visit_started_at = now()`, returns
+3. If gap <= 24 hours: same visit, returns
+4. If gap > 24 hours (new visit detected):
+   - Counts messages since `current_visit_started_at` (or `created_at` fallback)
+   - Determines visit number from existing `conversation_visits` count
+   - Inserts snapshot into `conversation_visits` with sentiment + message count + time range
+   - Resets `convo.initial_sentiment = None`, `convo.current_sentiment = None`, `convo.current_visit_started_at = now()`
+   - Logs the transition with visit details
 
-CREATE INDEX ix_visits_conversation ON conversation_visits(conversation_id);
-CREATE INDEX ix_visits_shop_started ON conversation_visits(shop_id, started_at DESC);
-```
+Handles timezone-naive datetimes from PostgreSQL by replacing `tzinfo` with UTC when needed.
 
-#### New Column on `conversations`
+### Message History Timestamps
 
-```sql
-ALTER TABLE conversations ADD COLUMN current_visit_started_at TIMESTAMPTZ;
-```
+- `get_recent_messages()`: DB fallback now includes `created_at` in history dicts (ISO format)
+- `save_message()`: Redis `append_to_history` now includes `created_at` in cached entries
+- Old Redis cache entries without `created_at` are handled gracefully via `has_timestamps` checks
 
-This tracks when the current visit began. The classifier uses this to filter messages.
+### Classifier Filtering (`app/services/ai_pipeline.py`)
 
-#### Visit Detection Flow (in message_worker)
+New `visit_started_at` parameter on `AIPipeline.process()`. Before the parallel `asyncio.gather`:
+- If `visit_started_at` is set and history has timestamps: filter to messages with `created_at >= visit_started_at`
+- If filtered result is empty (e.g., all messages from old visit): fall back to full history
+- If no timestamps in cache (old entries): fall back to full history
+- **Gemini still gets full unfiltered history** — remembers customer across visits
+- **Classifier gets current-visit history only** — fresh sentiment per visit
 
-When a new inbound message arrives:
+### Visit-Aware Inbound Count (worker + playground)
 
-```
-1. Load conversation from DB
-2. Find the latest message timestamp for this conversation
-3. If (now - latest_message_timestamp) > 24 hours:
-   a. This is a NEW VISIT
-   b. Snapshot current visit:
-      - INSERT INTO conversation_visits (
-          conversation_id, shop_id, visit_number,
-          initial_sentiment, current_sentiment,
-          message_count, started_at, ended_at
-        )
-      - message_count = count of messages since current_visit_started_at
-      - ended_at = latest_message_timestamp
-   c. Reset conversation for new visit:
-      - convo.initial_sentiment = NULL
-      - convo.current_sentiment = NULL
-      - convo.current_visit_started_at = now()
-   d. Log: "New visit started for convo=xyz (visit #N)"
-4. If (now - latest_message_timestamp) <= 24 hours:
-   a. Same visit — continue normally
-5. Process message through pipeline as usual
-```
-
-#### Classifier Filtering
-
-The classifier must only see messages from the CURRENT visit, not the entire history:
-
+The `inbound_count` for sentiment locking (initial_sentiment locked after 3+ messages) is filtered by current visit:
 ```python
-# In ai_pipeline.py, before calling classify_sentiment:
-visit_start = convo.current_visit_started_at
-
-if visit_start:
-    # Filter history to only current visit messages
-    visit_history = [
-        m for m in history
-        if m.get("created_at") and m["created_at"] >= visit_start.isoformat()
-    ]
-else:
-    visit_history = history
-
-# Classifier gets current-visit messages only
-sentiment_result = await classify_sentiment(visit_history, text)
+if visit_start_iso:
+    has_timestamps = any(m.get("created_at") for m in history)
+    if has_timestamps:
+        visit_inbound = [m for m in history if m.get("direction") == "inbound"
+                         and m.get("created_at") and m["created_at"] >= visit_start_iso]
+        inbound_count = len(visit_inbound) + 1
+    else:
+        inbound_count = len([m for m in history if m.get("direction") == "inbound"]) + 1
 ```
 
-**Important**: The main Gemini call still gets FULL history. Only the classifier is filtered. This way:
-- Gemini remembers the customer across visits (can reference past interactions)
-- Sentiment reflects only the current visit's mood
+This prevents inflated counts from old-visit messages after a visit reset. The `has_timestamps` check distinguishes "old cache without timestamps" (fallback to all) from "all timestamps before visit start" (correctly count zero).
 
-#### What Needs to Change in history
+### Playground (`app/api/dashboard.py`)
 
-Currently `get_recent_messages()` returns `[{"direction": "...", "content": "..."}]` without timestamps. For visit filtering, messages need a `created_at` field:
+- `detect_and_snapshot_visit(db, convo)` called before handoff check in `playground_chat`
+- Same `visit_start_iso` passed to `ai_pipeline.process()`
+- Same visit-aware `inbound_count` logic
+- `delete_playground_conversation` deletes `ConversationVisit` rows before messages (FK constraint)
 
-```python
-# In message_worker.py get_recent_messages():
-history = [
-    {
-        "direction": m.direction,
-        "content": m.content,
-        "created_at": m.created_at.isoformat() if m.created_at else None,
-    }
-    for m in reversed(messages)
-]
-```
+### API Endpoints
 
-And the Redis cache format must include `created_at` too (append_to_history already needs updating).
+- **Shop owner**: `GET /api/v1/shop/conversations/{id}/visits` — returns visit history ordered by visit_number DESC
+- **Admin**: `GET /api/v1/admin/shops/{shop_id}/conversations/{id}/visits` — same for admin audit view
+- Both verify conversation ownership before returning data
 
-#### Gemini Context
+### Frontend — Shop Owner (`conversations/page.tsx`)
 
-No change to Gemini. It still sees full history + summary of older messages. The `[عميل عائد — N محادثات سابقة]` enrichment tag already tells Gemini this is a returning customer.
+- `Visit` interface with `id`, `visit_number`, `initial_sentiment`, `current_sentiment`, `message_count`, `started_at`, `ended_at`
+- Fetches visits on conversation selection via `useEffect`
+- Collapsible `<details>` section: "سجل الزيارات (N زيارة سابقة)"
+- Each visit shows: visit number, date, message count, sentiment arrow with resolved (✓) / worsened (✗) indicators
 
-#### Analytics: Visit-Level Insights
+### Frontend — Admin (`shops/[id]/page.tsx`)
 
-The `conversation_visits` table enables new queries:
+- `VisitItem` interface matching the shop owner's
+- Fetches visits when conversation is selected in the conversations tab
+- Collapsible "Visit History (N past visits)" section above message thread
+- Same visit display format with sentiment arrows and resolved/worsened indicators
+
+### Edge Cases Handled
+
+- **First ever message**: No snapshot, just initializes `current_visit_started_at`
+- **Timezone-naive DB timestamps**: Replaced with UTC before gap calculation
+- **Old Redis cache without `created_at`**: `has_timestamps` check falls back to counting all messages
+- **FK on playground delete**: Visits deleted before messages and conversation
+- **Handoff across visits**: Keeps current handoff status — handoff spans visits if unresolved
+
+### Files Modified (Phases 10-11)
+
+| File | Change |
+|------|--------|
+| `alembic/versions/007_drop_deprecated_sentiment_column.py` | **NEW** — drops `sentiment` column |
+| `alembic/versions/008_add_conversation_visits.py` | **NEW** — visits table, indexes, `current_visit_started_at` column, backfill |
+| `app/models/schemas.py` | Removed `sentiment` Column/field/validator. Added `ConversationVisit` ORM, `current_visit_started_at`, `ConversationVisitResponse` |
+| `app/workers/message_worker.py` | `detect_and_snapshot_visit()`, `created_at` in history/cache, visit-aware `inbound_count` |
+| `app/services/ai_pipeline.py` | `visit_started_at` param, classifier history filtering with `has_timestamps` guard |
+| `app/api/dashboard.py` | Playground visit detection, visit-aware `inbound_count`, visits endpoint, FK-safe delete |
+| `app/api/admin.py` | Removed `sentiment` backward compat, admin visits endpoint |
+| `frontend/src/components/conversation-list.tsx` | Removed `sentiment` from interface |
+| `frontend/src/app/(dashboard)/conversations/page.tsx` | Removed `sentiment`, added `Visit` interface + visit history UI |
+| `admin/src/app/(dashboard)/shops/[id]/page.tsx` | Removed `sentiment`, added `VisitItem` interface + visit history UI |
+| `docs/sentiment-v2-plan.md` | Updated status and outcomes |
+
+### Useful Queries Enabled
 
 ```sql
--- Are returning customers getting happier over time?
-SELECT
-    visit_number,
-    AVG(CASE WHEN current_sentiment = 'positive' THEN 1 ELSE 0 END) as positive_rate
-FROM conversation_visits
-WHERE shop_id = :shop_id
-GROUP BY visit_number
-ORDER BY visit_number;
-
 -- Per-customer sentiment journey
 SELECT visit_number, initial_sentiment, current_sentiment, started_at
-FROM conversation_visits
-WHERE conversation_id = :conversation_id
-ORDER BY visit_number;
+FROM conversation_visits WHERE conversation_id = :id ORDER BY visit_number;
 
 -- Visit-over-visit resolution rate
 SELECT
     COUNT(*) FILTER (WHERE initial_sentiment = 'negative' AND current_sentiment = 'positive') as resolved,
     COUNT(*) FILTER (WHERE initial_sentiment = 'positive' AND current_sentiment = 'negative') as worsened,
     COUNT(*) as total_visits
-FROM conversation_visits
-WHERE shop_id = :shop_id AND started_at >= :start_date;
-```
-
-#### Frontend: Visit History (future)
-
-In the conversation detail view, a "Visit History" section could show:
-
-```
-Visit 3 (current) — started 10 Mar 2026
-  Mood: neutral
-
-Visit 2 — 15 Feb 2026 (4 messages)
-  Mood: negative → positive ✓
-
-Visit 1 — 20 Jan 2026 (8 messages)
-  Mood: negative → negative ✗
-```
-
-This gives the shop owner a customer satisfaction timeline.
-
-### Phase 11 Implementation Steps
-
-#### Step 1: Migration 007 (or 008 if cleanup runs first)
-- Create `conversation_visits` table with indexes
-- Add `current_visit_started_at` column to `conversations`
-- Backfill: set `current_visit_started_at = created_at` for all existing conversations
-
-#### Step 2: Update message history format
-- Add `created_at` to message history dicts (worker + Redis cache)
-- Update `get_recent_messages()` to include timestamps
-- Update `append_to_history()` to include timestamps
-
-#### Step 3: Visit detection in message_worker
-- Before processing, check time gap since last message
-- If >24h: snapshot visit, reset sentiment, start new visit
-- Log visit transitions
-
-#### Step 4: Update playground (dashboard.py)
-- Same visit detection logic for playground conversations
-
-#### Step 5: Filter classifier input
-- In `ai_pipeline.py`, filter history by `current_visit_started_at` before passing to classifier
-- Main Gemini call still gets full unfiltered history
-
-#### Step 6: Visit analytics API endpoints
-- `GET /api/v1/shop/conversations/{id}/visits` — visit history for a conversation
-- Update analytics endpoints to optionally include visit-level metrics
-
-#### Step 7: Frontend — visit history display
-- Conversation detail: "Visit History" section showing sentiment per visit
-- Analytics: visit-over-visit satisfaction trends
-
-### Phase 11 Files to Modify
-
-| File | Change |
-|------|--------|
-| `alembic/versions/007_or_008_add_visits.py` | **NEW** — migration for visits table + column |
-| `app/models/schemas.py` | New `ConversationVisit` ORM model + Pydantic schema, add `current_visit_started_at` to Conversation |
-| `app/workers/message_worker.py` | Visit detection logic, snapshot + reset, include created_at in history |
-| `app/api/dashboard.py` | Visit detection in playground, new visits endpoint |
-| `app/services/ai_pipeline.py` | Filter history for classifier by visit start |
-| `app/services/redis_client.py` | Update cache format to include created_at |
-| `app/services/classifiers.py` | No change (receives pre-filtered history) |
-| `frontend/src/app/(dashboard)/conversations/page.tsx` | Visit history section |
-| `admin/src/app/(dashboard)/shops/[id]/page.tsx` | Visit history in admin audit |
-
-### Phase 11 Edge Cases
-
-- **First ever message**: No previous visit exists. `current_visit_started_at` = now. No snapshot needed.
-- **Rapid messages after 24h gap**: First message triggers visit snapshot. Subsequent messages within the same burst are part of the new visit.
-- **Handoff across visits**: If a handoff is open when a new visit starts, the old visit gets snapshotted with the handoff state. The new visit starts fresh with `status="ai"` (or should it keep `status="human"`?). Decision: keep current status — handoff spans visits if unresolved.
-- **Playground conversations**: Playground messages don't have real 24h gaps (testing happens in bursts). Visit detection should still work but won't trigger often.
-- **Multiple messages in queue during gap detection**: Two workers processing messages simultaneously for the same conversation near the 24h boundary. Both might try to create a visit snapshot. Solution: use a Redis lock or DB upsert with `ON CONFLICT` on `(conversation_id, started_at)`.
-
-### Phase 11 Expected Logs
-
-```
-INFO  message_worker: New visit detected for convo=xyz (24h+ gap). Snapshotting visit #2 (initial=negative, current=positive, 8 messages). Starting visit #3.
-INFO  message_worker: Same visit continues for convo=xyz (last message 2h ago)
-INFO  ai_pipeline: Classifier filtered to current visit: 3 inbound messages (visit started 2026-03-10T14:00:00Z)
+FROM conversation_visits WHERE shop_id = :shop_id AND started_at >= :start_date;
 ```
 
 ---
