@@ -874,16 +874,24 @@ async def playground_chat(
         history=history,
     )
 
-    # Store sentiment on conversation
-    if result.sentiment:
-        convo.sentiment = result.sentiment
+    # Store sentiment on conversation (Sentiment V2: dual tracking)
+    inbound_count = len([m for m in history if m.get("direction") == "inbound"]) + 1
+    if result.initial_sentiment:
+        if not convo.initial_sentiment or inbound_count <= 3:
+            convo.initial_sentiment = result.initial_sentiment
+    if result.current_sentiment:
+        convo.current_sentiment = result.current_sentiment
+
+    # Only track transitions when initial_sentiment is locked (>3 messages)
+    locked_initial = convo.initial_sentiment if inbound_count > 3 else ""
 
     # Track analytics in Redis (same as message_worker)
     await redis_client.track_message_processed(
         shop_id=str(shop.id),
         response_time_ms=result.response_time_ms,
         was_escalated=result.handoff_needed,
-        sentiment=result.sentiment,
+        current_sentiment=result.current_sentiment,
+        initial_sentiment=locked_initial,
         hour=datetime.now(timezone.utc).hour,
     )
 

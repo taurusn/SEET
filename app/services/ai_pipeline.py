@@ -27,7 +27,8 @@ class PipelineResult:
     reply: str
     handoff_needed: bool
     handoff_reason: str
-    sentiment: str
+    initial_sentiment: str
+    current_sentiment: str
     response_time_ms: int
 
 
@@ -147,12 +148,13 @@ class AIPipeline:
             is_open, closed_msg = check_business_hours(business_hours_json)
             if not is_open and closed_msg:
                 elapsed = int((time.monotonic() - start) * 1000)
-                logger.info("Shop closed — skipping Gemini, sending auto-reply")
+                logger.info("Shop closed — skipping Gemini, sending auto-reply (sentiment=neutral/neutral)")
                 return PipelineResult(
                     reply=closed_msg,
                     handoff_needed=False,
                     handoff_reason="",
-                    sentiment="neutral",
+                    initial_sentiment="neutral",
+                    current_sentiment="neutral",
                     response_time_ms=elapsed,
                 )
 
@@ -160,12 +162,12 @@ class AIPipeline:
         system_prompt = build_modular_prompt(context, customer_info)
         enriched_msg = _enrich_message(text, customer_info)
 
-        # ── PARALLEL: Main Gemini + Sentiment micro-call ──
-        raw_reply, sentiment = await asyncio.gather(
+        # ── PARALLEL: Main Gemini + Conversation-aware sentiment classifier ──
+        raw_reply, sentiment_result = await asyncio.gather(
             gemini_service.generate_reply(
                 system_prompt, history, enriched_msg, conversation_id
             ),
-            classify_sentiment(text),
+            classify_sentiment(history, text),
         )
 
         # ── Post-processors ──
@@ -181,13 +183,16 @@ class AIPipeline:
             reply=clean_reply,
             handoff_needed=handoff_needed,
             handoff_reason=handoff_reason,
-            sentiment=sentiment,
+            initial_sentiment=sentiment_result.initial_mood,
+            current_sentiment=sentiment_result.current_mood,
             response_time_ms=elapsed,
         )
 
         logger.info(
-            "Pipeline result: sentiment=%s, handoff=%s, time=%dms, reply='%s'",
-            result.sentiment,
+            "Pipeline result: initial_sentiment=%s, current_sentiment=%s, "
+            "handoff=%s, time=%dms, reply='%s'",
+            result.initial_sentiment,
+            result.current_sentiment,
             result.handoff_needed,
             result.response_time_ms,
             result.reply[:80],

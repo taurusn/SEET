@@ -188,20 +188,21 @@ class RedisClient:
 
     # ─── Analytics Tracking ─────────────────────────────────────────────
 
-    ANALYTICS_TTL = 35 * 86400  # 35 days — ~1 month of data
+    ANALYTICS_TTL = 45 * 86400  # 45 days — comfortable buffer for 30-day views
 
     async def track_message_processed(
         self,
         shop_id: str,
         response_time_ms: int,
         was_escalated: bool,
-        sentiment: str,
+        current_sentiment: str,
         hour: int,
+        initial_sentiment: str = "",
     ) -> None:
         """Track a processed message for analytics.
 
         Uses Redis pipeline for atomic batch writes (single round-trip).
-        Keys are per shop per day with 35-day TTL.
+        Keys are per shop per day with 45-day TTL.
         """
         date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         prefix = f"analytics:{shop_id}:{date_str}"
@@ -222,9 +223,19 @@ class RedisClient:
         pipe.incr(f"{prefix}:hourly:{hour}")
         pipe.expire(f"{prefix}:hourly:{hour}", self.ANALYTICS_TTL)
 
-        if sentiment in ("positive", "neutral", "negative"):
-            pipe.incr(f"{prefix}:sentiment:{sentiment}")
-            pipe.expire(f"{prefix}:sentiment:{sentiment}", self.ANALYTICS_TTL)
+        # Sentiment breakdown (tracks current_sentiment per message)
+        if current_sentiment in ("positive", "neutral", "negative"):
+            pipe.incr(f"{prefix}:sentiment:{current_sentiment}")
+            pipe.expire(f"{prefix}:sentiment:{current_sentiment}", self.ANALYTICS_TTL)
+
+        # Transition tracking (resolved = neg→pos, worsened = pos→neg)
+        if initial_sentiment in ("positive", "neutral", "negative") and current_sentiment in ("positive", "neutral", "negative"):
+            if initial_sentiment == "negative" and current_sentiment == "positive":
+                pipe.incr(f"{prefix}:transitions:resolved")
+                pipe.expire(f"{prefix}:transitions:resolved", self.ANALYTICS_TTL)
+            elif initial_sentiment == "positive" and current_sentiment == "negative":
+                pipe.incr(f"{prefix}:transitions:worsened")
+                pipe.expire(f"{prefix}:transitions:worsened", self.ANALYTICS_TTL)
 
         await pipe.execute()
 
@@ -243,6 +254,7 @@ class RedisClient:
         hourly = [0] * 24
         daily: list[dict] = []
         sentiment = {"positive": 0, "neutral": 0, "negative": 0}
+        transitions = {"resolved": 0, "worsened": 0}
 
         for i in range(days):
             date = today - timedelta(days=i)
@@ -250,15 +262,17 @@ class RedisClient:
             prefix = f"analytics:{shop_id}:{date_str}"
 
             pipe = self.client.pipeline()
-            pipe.get(f"{prefix}:messages")
-            pipe.get(f"{prefix}:escalations")
-            pipe.get(f"{prefix}:rt_sum")
-            pipe.get(f"{prefix}:rt_count")
+            pipe.get(f"{prefix}:messages")           # 0
+            pipe.get(f"{prefix}:escalations")        # 1
+            pipe.get(f"{prefix}:rt_sum")             # 2
+            pipe.get(f"{prefix}:rt_count")           # 3
             for h in range(24):
-                pipe.get(f"{prefix}:hourly:{h}")
-            pipe.get(f"{prefix}:sentiment:positive")
-            pipe.get(f"{prefix}:sentiment:neutral")
-            pipe.get(f"{prefix}:sentiment:negative")
+                pipe.get(f"{prefix}:hourly:{h}")     # 4..27
+            pipe.get(f"{prefix}:sentiment:positive")  # 28
+            pipe.get(f"{prefix}:sentiment:neutral")   # 29
+            pipe.get(f"{prefix}:sentiment:negative")  # 30
+            pipe.get(f"{prefix}:transitions:resolved")  # 31
+            pipe.get(f"{prefix}:transitions:worsened")  # 32
             results = await pipe.execute()
 
             day_msgs = int(results[0] or 0)
@@ -277,6 +291,8 @@ class RedisClient:
             sentiment["positive"] += int(results[28] or 0)
             sentiment["neutral"] += int(results[29] or 0)
             sentiment["negative"] += int(results[30] or 0)
+            transitions["resolved"] += int(results[31] or 0)
+            transitions["worsened"] += int(results[32] or 0)
 
             daily.append({"date": date_str, "messages": day_msgs, "escalations": day_esc})
 
@@ -297,6 +313,7 @@ class RedisClient:
             "messages_by_hour": hourly,
             "messages_by_day": daily,
             "sentiment_breakdown": sentiment,
+            "sentiment_transitions": transitions,
         }
 
     async def close(self) -> None:

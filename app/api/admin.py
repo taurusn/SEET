@@ -516,6 +516,7 @@ async def get_platform_analytics(
         "messages_by_hour": [0] * 24,
         "messages_by_day": {},
         "sentiment_breakdown": {"positive": 0, "neutral": 0, "negative": 0},
+        "sentiment_transitions": {"resolved": 0, "worsened": 0},
     }
     rt_sum, rt_count = 0, 0
 
@@ -548,6 +549,11 @@ async def get_platform_analytics(
         totals["sentiment_breakdown"]["positive"] += sb.get("positive", 0)
         totals["sentiment_breakdown"]["neutral"] += sb.get("neutral", 0)
         totals["sentiment_breakdown"]["negative"] += sb.get("negative", 0)
+
+        # Transitions
+        st = data.get("sentiment_transitions", {})
+        totals["sentiment_transitions"]["resolved"] += st.get("resolved", 0)
+        totals["sentiment_transitions"]["worsened"] += st.get("worsened", 0)
 
     total_msgs = totals["total_messages"]
     totals["avg_response_time_ms"] = round(rt_sum / rt_count) if rt_count > 0 else 0
@@ -637,7 +643,9 @@ async def list_shop_conversations_admin(
             "platform": c.platform,
             "customer_id": c.customer_id,
             "status": c.status,
-            "sentiment": c.sentiment,
+            "sentiment": c.current_sentiment,  # backward compat
+            "initial_sentiment": c.initial_sentiment,
+            "current_sentiment": c.current_sentiment,
             "created_at": c.created_at.isoformat() if c.created_at else None,
         }
         for c in convos

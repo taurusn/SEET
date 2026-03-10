@@ -20,6 +20,7 @@ interface Analytics {
   messages_by_hour: number[];
   messages_by_day: { date: string; messages: number; escalations: number }[];
   sentiment_breakdown: { positive: number; neutral: number; negative: number };
+  sentiment_transitions?: { resolved: number; worsened: number };
 }
 
 const periods = [
@@ -300,6 +301,49 @@ export default function AnalyticsPage() {
               </div>
             )}
           </div>
+
+          {/* AI Resolution — Sentiment Transitions */}
+          {data.sentiment_transitions && (data.sentiment_transitions.resolved > 0 || data.sentiment_transitions.worsened > 0) && (
+            <div className="bg-card rounded-2xl border border-border p-5 shadow-sm">
+              <h3 className="font-bold text-sm mb-4">فعالية الذكاء الاصطناعي</h3>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm">محادثات تحسّنت</span>
+                  <span className="text-sm font-medium text-green-500">
+                    {data.sentiment_transitions.resolved}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm">محادثات ساءت</span>
+                  <span className="text-sm font-medium text-red-500">
+                    {data.sentiment_transitions.worsened}
+                  </span>
+                </div>
+                {(data.sentiment_transitions.resolved + data.sentiment_transitions.worsened) > 0 && (
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-sm">نسبة الحل</span>
+                      <span className="text-sm font-medium text-green-500">
+                        {Math.round(
+                          (data.sentiment_transitions.resolved /
+                            (data.sentiment_transitions.resolved + data.sentiment_transitions.worsened)) *
+                            100
+                        )}%
+                      </span>
+                    </div>
+                    <div className="h-2.5 bg-muted rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-green-500 rounded-full transition-all"
+                        style={{
+                          width: `${(data.sentiment_transitions.resolved / (data.sentiment_transitions.resolved + data.sentiment_transitions.worsened)) * 100}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>

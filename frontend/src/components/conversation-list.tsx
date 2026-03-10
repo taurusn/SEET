@@ -9,6 +9,8 @@ interface Conversation {
   customer_id: string;
   status: string;
   sentiment?: string | null;
+  initial_sentiment?: string | null;
+  current_sentiment?: string | null;
   created_at: string;
 }
 
@@ -82,13 +84,17 @@ export function ConversationList({
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {convo.sentiment && (
+            {(convo.current_sentiment || convo.sentiment) && (
               <span
                 className={cn(
                   "w-2 h-2 rounded-full flex-shrink-0",
-                  sentimentColors[convo.sentiment] || "bg-gray-400"
+                  sentimentColors[convo.current_sentiment || convo.sentiment || ""] || "bg-gray-400"
                 )}
-                title={convo.sentiment}
+                title={
+                  convo.initial_sentiment && convo.current_sentiment && convo.initial_sentiment !== convo.current_sentiment
+                    ? `${convo.initial_sentiment} → ${convo.current_sentiment}`
+                    : convo.current_sentiment || convo.sentiment || ""
+                }
               />
             )}
             <p className="text-sm font-medium truncate">{convo.customer_id}</p>

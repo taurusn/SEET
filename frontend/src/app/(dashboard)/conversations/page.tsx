@@ -15,6 +15,8 @@ interface Conversation {
   customer_id: string;
   status: string;
   sentiment?: string | null;
+  initial_sentiment?: string | null;
+  current_sentiment?: string | null;
   created_at: string;
 }
 
@@ -206,6 +208,21 @@ export default function ConversationsPage() {
                           عميل عائد ({customerProfile.total_conversations} محادثات)
                         </span>
                       )}
+                      {(() => {
+                        const convo = conversations.find((c) => c.id === selectedId);
+                        if (convo?.initial_sentiment && convo?.current_sentiment && convo.initial_sentiment !== convo.current_sentiment) {
+                          const colors: Record<string, string> = { positive: "text-green-500", neutral: "text-gray-400", negative: "text-red-500" };
+                          const labels: Record<string, string> = { positive: "ايجابي", neutral: "محايد", negative: "سلبي" };
+                          return (
+                            <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-muted whitespace-nowrap">
+                              <span className={colors[convo.initial_sentiment] || ""}>{labels[convo.initial_sentiment] || convo.initial_sentiment}</span>
+                              {" → "}
+                              <span className={colors[convo.current_sentiment] || ""}>{labels[convo.current_sentiment] || convo.current_sentiment}</span>
+                            </span>
+                          );
+                        }
+                        return null;
+                      })()}
                     </div>
                     <p className="text-xs text-muted-foreground">
                       {conversations.find((c) => c.id === selectedId)?.platform ===

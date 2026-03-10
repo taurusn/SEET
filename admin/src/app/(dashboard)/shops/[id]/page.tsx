@@ -47,6 +47,7 @@ interface Analytics {
   messages_by_hour: number[];
   messages_by_day: { date: string; messages: number; escalations: number }[];
   sentiment_breakdown: { positive: number; neutral: number; negative: number };
+  sentiment_transitions?: { resolved: number; worsened: number };
 }
 
 interface ConvoItem {
@@ -55,6 +56,8 @@ interface ConvoItem {
   customer_id: string;
   status: string;
   sentiment?: string | null;
+  initial_sentiment?: string | null;
+  current_sentiment?: string | null;
   created_at: string;
 }
 
@@ -798,6 +801,45 @@ export default function ShopDetailPage() {
                     );
                   })()}
                 </div>
+
+                {/* AI Resolution — Sentiment Transitions */}
+                {analytics.sentiment_transitions && (analytics.sentiment_transitions.resolved > 0 || analytics.sentiment_transitions.worsened > 0) && (
+                  <div className="bg-card border border-border rounded-xl p-5">
+                    <h3 className="text-sm font-semibold mb-3">AI Resolution</h3>
+                    <div className="space-y-3">
+                      <div className="flex justify-between text-xs">
+                        <span>Resolved (neg &rarr; pos)</span>
+                        <span className="text-success font-medium">{analytics.sentiment_transitions.resolved}</span>
+                      </div>
+                      <div className="flex justify-between text-xs">
+                        <span>Worsened (pos &rarr; neg)</span>
+                        <span className="text-danger font-medium">{analytics.sentiment_transitions.worsened}</span>
+                      </div>
+                      {(analytics.sentiment_transitions.resolved + analytics.sentiment_transitions.worsened) > 0 && (
+                        <div>
+                          <div className="flex justify-between text-xs mb-1">
+                            <span>Resolution rate</span>
+                            <span className="text-success font-medium">
+                              {Math.round(
+                                (analytics.sentiment_transitions.resolved /
+                                  (analytics.sentiment_transitions.resolved + analytics.sentiment_transitions.worsened)) *
+                                  100
+                              )}%
+                            </span>
+                          </div>
+                          <div className="h-2 bg-muted rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-success rounded-full transition-all"
+                              style={{
+                                width: `${(analytics.sentiment_transitions.resolved / (analytics.sentiment_transitions.resolved + analytics.sentiment_transitions.worsened)) * 100}%`,
+                              }}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Daily trend */}
