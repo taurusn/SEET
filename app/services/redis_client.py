@@ -18,6 +18,7 @@ class RedisClient:
 
     def __init__(self):
         self._client: Optional[redis.Redis] = None
+        self._pubsub_client: Optional[redis.Redis] = None
 
     async def connect(self) -> None:
         settings = get_settings()
@@ -25,6 +26,13 @@ class RedisClient:
             settings.redis_url,
             decode_responses=True,
             max_connections=100,
+        )
+        # Separate pool for pub/sub so SSE reconnection storms
+        # don't exhaust the main connection pool.
+        self._pubsub_client = redis.from_url(
+            settings.redis_url,
+            decode_responses=True,
+            max_connections=50,
         )
         await self._client.ping()
         logger.info("Redis connected")
@@ -181,8 +189,13 @@ class RedisClient:
         await self.client.publish(channel, json.dumps(event, default=str))
 
     async def subscribe_events(self, shop_id: str):
-        """Subscribe to a shop's event channel. Returns an async pubsub object."""
-        pubsub = self.client.pubsub()
+        """Subscribe to a shop's event channel. Returns an async pubsub object.
+
+        Uses a dedicated pub/sub connection pool so SSE reconnection storms
+        don't exhaust the main pool used by API endpoints.
+        """
+        client = self._pubsub_client or self.client
+        pubsub = client.pubsub()
         await pubsub.subscribe(f"events:{shop_id}")
         return pubsub
 
@@ -317,6 +330,8 @@ class RedisClient:
         }
 
     async def close(self) -> None:
+        if self._pubsub_client:
+            await self._pubsub_client.close()
         if self._client:
             await self._client.close()
             logger.info("Redis connection closed")

@@ -37,7 +37,13 @@ def decode_shop_id_from_token(token: str) -> str | None:
 
 async def event_generator(request: Request, shop_id: str):
     """Yield SSE events from Redis pub/sub for a specific shop."""
-    pubsub = await redis_client.subscribe_events(shop_id)
+    try:
+        pubsub = await redis_client.subscribe_events(shop_id)
+    except Exception as e:
+        logger.warning("Failed to subscribe to Redis pub/sub for shop %s: %s", shop_id, e)
+        # Yield a retry hint and stop — prevents rapid reconnect storms
+        yield {"event": "error", "data": json.dumps({"message": "temporary error"}), "retry": 10000}
+        return
 
     try:
         while True:
