@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Pre-commit: block non-loopback port publishes in docker-compose.yml.
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+python3 scripts/check-compose-ports.py docker-compose.yml

@@ -3,6 +3,14 @@ when:
   event: push
 
 steps:
+  # ─── Security: block non-loopback port publishes ─────────────────────────
+  lockdown-check:
+    image: python:3.12-slim
+    commands:
+      - pip install pyyaml -q
+      - python3 scripts/check-compose-ports.py docker-compose.yml
+    depends_on: []
+
   # ─── Deploy ──────────────────────────────────────────────────────────────
   deploy:
     image: docker
@@ -19,6 +27,7 @@ steps:
       - docker compose -p seet exec -T api alembic upgrade head || true
       - docker compose -p seet ps
       - docker image prune -f
+    depends_on: [lockdown-check]
 
   # ─── Test ────────────────────────────────────────────────────────────────
   test:
