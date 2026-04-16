@@ -6,8 +6,8 @@ export const metadata: Metadata = {
   title: "SEET Admin",
   description: "SEET Admin Portal — Shop management & onboarding",
   icons: {
-    icon: "/admin/seet-s.png",
-    apple: "/admin/seet-s.png",
+    icon: "/admin/seet-mark.png",
+    apple: "/admin/seet-mark.png",
   },
 };
 

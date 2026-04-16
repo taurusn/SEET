@@ -125,7 +125,7 @@ export default function RegisterPage() {
         <div className="w-full max-w-sm">
           <div className="md:hidden text-center mb-8">
             <Image
-              src="/seet-s.png"
+              src="/seet-mark.png"
               alt="SEET"
               width={48}
               height={48}
@@ -136,7 +136,7 @@ export default function RegisterPage() {
 
           <div className="hidden md:block mb-2">
             <Image
-              src="/seet-s.png"
+              src="/seet-mark.png"
               alt="SEET"
               width={48}
               height={48}

@@ -106,7 +106,7 @@ export default function DashboardLayout({
             />
           ) : (
             <Image
-              src="/seet-s.png"
+              src="/seet-mark.png"
               alt="SEET"
               width={40}
               height={40}
