@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Image from "next/image";
 
 interface SplashScreenProps {
   logoUrl?: string;
@@ -70,13 +69,12 @@ export function SplashScreen({
             className="w-24 h-24 object-contain rounded-2xl relative z-10"
           />
         ) : (
-          <Image
-            src="/seet-logo.png"
+          <img
+            src="/seet-mark-animated.svg"
             alt="SEET"
             width={160}
             height={160}
-            className="w-28 invert relative z-10"
-            priority
+            className="w-28 h-28 relative z-10"
           />
         )}
       </div>

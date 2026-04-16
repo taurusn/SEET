@@ -106,12 +106,13 @@ export default function DashboardLayout({
             />
           ) : (
             <Image
-              src="/seet-mark.png"
+              src="/seet-mark.svg"
               alt="SEET"
               width={40}
               height={40}
               className="h-10 w-10"
               priority
+              unoptimized
             />
           )}
           {shop && (

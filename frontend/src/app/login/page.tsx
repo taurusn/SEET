@@ -320,24 +320,26 @@ export default function LoginPage() {
           {/* Mobile logo */}
           <div className="md:hidden text-center mb-8">
             <Image
-              src="/seet-mark.png"
+              src="/seet-mark.svg"
               alt="SEET"
               width={48}
               height={48}
               className="mx-auto mb-3"
               priority
+              unoptimized
             />
           </div>
 
           {/* Desktop icon */}
           <div className="hidden md:block mb-2">
             <Image
-              src="/seet-mark.png"
+              src="/seet-mark.svg"
               alt="SEET"
               width={48}
               height={48}
               className="mb-6"
               priority
+              unoptimized
             />
           </div>
 
