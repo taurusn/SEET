@@ -43,3 +43,24 @@ steps:
       - pip install ruff -q
       - ruff check app/
     depends_on: []
+
+  # ─── Notify: email Hatim with real pipeline status ───────────────────────
+  notify-success:
+    image: python:3.12-slim
+    volumes:
+      - /home/ubuntu/SEET:/home/ubuntu/SEET
+    commands:
+      - python3 /home/ubuntu/SEET/scripts/ci-notify.py success
+    when:
+      - status: [success]
+    depends_on: [lockdown-check, deploy, test, lint]
+
+  notify-failure:
+    image: python:3.12-slim
+    volumes:
+      - /home/ubuntu/SEET:/home/ubuntu/SEET
+    commands:
+      - python3 /home/ubuntu/SEET/scripts/ci-notify.py failure
+    when:
+      - status: [failure]
+    depends_on: [lockdown-check, deploy, test, lint]
