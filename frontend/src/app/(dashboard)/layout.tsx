@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import { Dock } from "@/components/sidebar";
 import { SplashScreen } from "@/components/splash-screen";
+import { StaticLogo } from "@/components/static-logo";
 import { useSSE, notifyHandoff, SSEEvent } from "@/lib/sse";
 import { generateTheme, applyTheme, clearTheme } from "@/lib/theme";
 import Image from "next/image";
@@ -99,10 +100,10 @@ export default function DashboardLayout({
       <header className="sticky top-0 z-40 bg-background/80 backdrop-blur-md border-b border-border/50">
         <div className="max-w-7xl mx-auto px-4 md:px-8 h-14 flex items-center justify-between">
           {shop?.logo_url ? (
-            <img
+            <StaticLogo
               src={shop.logo_url}
               alt={shop.name}
-              className="h-10 w-auto object-contain"
+              className="h-10 w-auto"
             />
           ) : (
             <Image
