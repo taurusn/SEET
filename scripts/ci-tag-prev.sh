@@ -1,5 +1,6 @@
-#!/bin/bash
+#!/bin/sh
 # ci-tag-prev: snapshot currently-running images with a :prev tag.
+# POSIX-clean so it runs on Alpine sh (BusyBox) in the CI container.
 #
 # Runs between sync-code and build. Captures the image hash of each
 # currently-running container and applies `seet-<service>:prev` so that

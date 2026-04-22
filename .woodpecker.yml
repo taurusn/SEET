@@ -46,6 +46,13 @@ variables:
       - event: push
         branch: main
 
+  # Quality gates run on every push AND every pull request. Woodpecker
+  # requires an explicit event filter on every step (the "bad_habit"
+  # warning) so make it explicit rather than implicit-everywhere.
+  - &quality_gate
+    when:
+      - event: [push, pull_request]
+
 steps:
   # ─── Quality gates (run on every push and pull_request) ──────────────────
   lockdown-check:
@@ -54,12 +61,14 @@ steps:
       - pip install pyyaml -q
       - python3 scripts/check-compose-ports.py docker-compose.yml
     depends_on: []
+    <<: *quality_gate
 
   check-migrations:
     image: *python_image
     commands:
       - python3 scripts/check-migrations.py
     depends_on: []
+    <<: *quality_gate
 
   lint-python:
     image: *python_image
@@ -67,6 +76,7 @@ steps:
       - pip install ruff -q
       - ruff check app/
     depends_on: []
+    <<: *quality_gate
 
   test-python:
     image: *python_image
@@ -74,6 +84,7 @@ steps:
       - pip install -r requirements.txt pytest -q
       - python -m pytest tests/ -x -q
     depends_on: []
+    <<: *quality_gate
 
   lint-frontend:
     image: *node_image
@@ -84,6 +95,7 @@ steps:
       - npm install --no-audit --no-fund --prefer-offline
       - npm run lint
     depends_on: []
+    <<: *quality_gate
 
   lint-admin:
     image: *node_image
@@ -94,6 +106,7 @@ steps:
       - npm install --no-audit --no-fund --prefer-offline
       - npm run lint
     depends_on: []
+    <<: *quality_gate
 
   typecheck-frontend:
     image: *node_image
@@ -104,6 +117,7 @@ steps:
       - npm install --no-audit --no-fund --prefer-offline
       - npx tsc --noEmit
     depends_on: []
+    <<: *quality_gate
 
   typecheck-admin:
     image: *node_image
@@ -114,6 +128,7 @@ steps:
       - npm install --no-audit --no-fund --prefer-offline
       - npx tsc --noEmit
     depends_on: []
+    <<: *quality_gate
 
   # ─── Deploy chain (push to main only) ────────────────────────────────────
   sync-code:
@@ -142,7 +157,7 @@ steps:
       CI_COMMIT_SHA: ${CI_COMMIT_SHA}
     commands:
       - cd /home/ubuntu/SEET
-      - bash scripts/ci-backup-db.sh
+      - sh scripts/ci-backup-db.sh
     depends_on: [sync-code]
     <<: *deploy_only
 
@@ -153,7 +168,7 @@ steps:
       # Snapshot currently-running images as :prev BEFORE build overwrites
       # :latest — enables a one-command code rollback via scripts/rollback.sh.
       - cd /home/ubuntu/SEET
-      - bash scripts/ci-tag-prev.sh
+      - sh scripts/ci-tag-prev.sh
     depends_on: [sync-code]
     <<: *deploy_only
 
@@ -198,7 +213,7 @@ steps:
     volumes: *server_paths
     commands:
       - cd /home/ubuntu/SEET
-      - bash scripts/ci-healthcheck.sh
+      - sh scripts/ci-healthcheck.sh
     depends_on: [deploy]
     <<: *deploy_only
 
@@ -237,7 +252,8 @@ steps:
       - healthcheck
       - cleanup
     when:
-      - status: [success]
+      - event: [push, pull_request]
+        status: [success]
 
   notify-failure:
     image: *python_image
@@ -263,4 +279,5 @@ steps:
       - healthcheck
       - cleanup
     when:
-      - status: [failure]
+      - event: [push, pull_request]
+        status: [failure]

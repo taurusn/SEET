@@ -1,5 +1,7 @@
-#!/bin/bash
+#!/bin/sh
 # ci-backup-db: pg_dump the SEET database before a deploy, rotate old backups.
+# POSIX-clean so it runs inside the Alpine-based docker:27 CI image
+# without apk-installing bash.
 #
 # Why: every deploy can run `alembic upgrade head`. If a migration goes wrong
 # — a bad constraint, a deadlock, a typo — we want a point-in-time dump we

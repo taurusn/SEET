@@ -1,5 +1,6 @@
-#!/bin/bash
+#!/bin/sh
 # ci-healthcheck: poll /health inside the API container until it answers 200.
+# POSIX-clean so it runs on Alpine sh (BusyBox) in the CI container.
 #
 # Fails the pipeline if the new container never comes up cleanly, instead of
 # letting Woodpecker declare success on a silently-broken deploy.
