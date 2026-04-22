@@ -30,6 +30,7 @@ interface ShopDetail {
   wa_phone_number_id?: string;
   wa_waba_id?: string;
   is_active: boolean;
+  moderation_mode: string;
   logo_url?: string;
   brand_color?: string;
   splash_text?: string;
@@ -37,6 +38,22 @@ interface ShopDetail {
   total_conversations: number;
   active_handoffs: number;
 }
+
+type ProcessingMode = "auto" | "review" | "inactive";
+
+function modeOf(shop: ShopDetail | null): ProcessingMode {
+  if (!shop) return "inactive";
+  if (!shop.is_active) return "inactive";
+  return shop.moderation_mode === "pending" ? "review" : "auto";
+}
+
+const MODE_COPY: Record<ProcessingMode, string> = {
+  auto: "AI replies to incoming messages automatically.",
+  review:
+    "New messages queue in the Moderation tab until an admin approves them.",
+  inactive:
+    "Shop is off. Incoming Meta events are dropped. No replies, no storage.",
+};
 
 interface ContextItem {
   id: string;
@@ -276,13 +293,39 @@ export default function ShopDetailPage() {
     }
   };
 
-  const toggleShop = async () => {
+  // Switch processing mode from the segmented control.
+  //   auto     — is_active=true, moderation_mode="auto"
+  //   review   — is_active=true, moderation_mode="pending"
+  //   inactive — is_active=false (via bidirectional /toggle)
+  //
+  // Reactivation from inactive uses /toggle (now bidirectional) followed
+  // by a PATCH to set the desired moderation_mode.
+  const switchMode = async (next: ProcessingMode) => {
+    if (!shop) return;
+    const current = modeOf(shop);
+    if (next === current) return;
     setError("");
+
     try {
-      await api.post(`/api/v1/admin/shops/${id}/toggle`);
+      if (next === "inactive") {
+        if (!shop.is_active) return;
+        await api.post(`/api/v1/admin/shops/${id}/toggle`);
+        await loadShop();
+        return;
+      }
+
+      // Reactivating — flip is_active on via /toggle, then set mode.
+      if (!shop.is_active) {
+        await api.post(`/api/v1/admin/shops/${id}/toggle`);
+      }
+
+      // auto ↔ review (and the post-activation mode set) — PATCH mode.
+      await api.patch(`/api/v1/admin/shops/${id}`, {
+        moderation_mode: next === "review" ? "pending" : "auto",
+      });
       await loadShop();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to toggle status");
+      setError(e instanceof Error ? e.message : "Failed to change mode");
     }
   };
 
@@ -408,16 +451,25 @@ export default function ShopDetailPage() {
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-2xl font-bold">{shop.name}</h1>
-              <span
-                className={cn(
-                  "px-2 py-0.5 rounded text-[10px] font-medium uppercase tracking-wide",
-                  shop.is_active
-                    ? "bg-success/10 text-success"
-                    : "bg-muted text-muted-foreground",
-                )}
-              >
-                {shop.is_active ? "Active" : "Inactive"}
-              </span>
+              {(() => {
+                const current = modeOf(shop);
+                return (
+                  <span
+                    className={cn(
+                      "px-2 py-0.5 rounded text-[10px] font-medium uppercase tracking-wide",
+                      current === "auto" && "bg-success/10 text-success",
+                      current === "review" && "bg-warning/10 text-warning",
+                      current === "inactive" && "bg-muted text-muted-foreground",
+                    )}
+                  >
+                    {current === "auto"
+                      ? "Auto"
+                      : current === "review"
+                      ? "Review"
+                      : "Inactive"}
+                  </span>
+                );
+              })()}
             </div>
             <p className="text-sm text-muted-foreground">
               Created {formatDate(shop.created_at)}
@@ -492,17 +544,6 @@ export default function ShopDetailPage() {
           >
             <KeyRound className="w-3.5 h-3.5" />
             Set login credentials
-          </button>
-          <button
-            onClick={toggleShop}
-            className={cn(
-              "px-4 py-2 rounded-lg text-sm font-medium transition-colors",
-              shop.is_active
-                ? "bg-danger/10 text-danger hover:bg-danger/20"
-                : "bg-success/10 text-success hover:bg-success/20",
-            )}
-          >
-            {shop.is_active ? "Deactivate" : "Activate"}
           </button>
         </div>
       </div>
@@ -598,6 +639,58 @@ export default function ShopDetailPage() {
           )}
         </div>
       )}
+
+      {/* Processing mode — three-state segmented control */}
+      {(() => {
+        const current = modeOf(shop);
+        const OPTIONS: { value: ProcessingMode; label: string }[] = [
+          { value: "auto", label: "Auto" },
+          { value: "review", label: "Review" },
+          { value: "inactive", label: "Inactive" },
+        ];
+        return (
+          <div className="mb-6 bg-card border border-border rounded-xl p-4">
+            <div className="flex items-center justify-between gap-4 flex-wrap">
+              <div>
+                <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">
+                  Processing mode
+                </h3>
+                <p className="text-sm text-foreground">{MODE_COPY[current]}</p>
+              </div>
+              <div
+                className="inline-flex rounded-lg border border-border bg-muted/40 p-1"
+                role="radiogroup"
+                aria-label="Processing mode"
+              >
+                {OPTIONS.map((opt) => {
+                  const selected = current === opt.value;
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      onClick={() => switchMode(opt.value)}
+                      className={cn(
+                        "px-3 py-1.5 text-xs font-semibold rounded-md transition-colors min-w-[72px]",
+                        selected
+                          ? opt.value === "auto"
+                            ? "bg-card text-success shadow-sm"
+                            : opt.value === "review"
+                            ? "bg-card text-warning shadow-sm"
+                            : "bg-card text-muted-foreground shadow-sm"
+                          : "text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Tabs */}
       <div className="flex gap-1 mb-6 border-b border-border">

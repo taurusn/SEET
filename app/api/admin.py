@@ -37,6 +37,7 @@ from app.models.schemas import (
     ShopUpdate,
     ShopContextCreate,
     ShopContextResponse,
+    PendingMessageResponse,
 )
 from app.api.admin_auth import (
     hash_password,
@@ -50,6 +51,7 @@ from app.services.redis_client import redis_client
 from app.services.storage import upload_logo, delete_logo
 from app.services.export import messages_to_csv, analytics_to_csv
 from app.services.meta_verify import verify_ig_credentials, verify_wa_credentials
+from app.workers.message_worker import run_ai_reply_stage, get_recent_messages
 from app.services.shop_auth import (
     hash_password as hash_shop_password,
     is_valid_email,
@@ -449,6 +451,7 @@ async def get_shop_detail(
         wa_phone_number_id=shop.wa_phone_number_id,
         wa_waba_id=shop.wa_waba_id,
         is_active=shop.is_active,
+        moderation_mode=shop.moderation_mode or "auto",
         logo_url=shop.logo_url,
         brand_color=shop.brand_color,
         splash_text=shop.splash_text,
@@ -682,6 +685,145 @@ async def get_dlq_stats(
         "by_reason": {k: int(v) for k, v in (reason_counts_raw or {}).items()},
         "recent": [_parse(e) for e in recent],
     }
+
+
+# ─── Moderation Queue ───────────────────────────────────────────────────────
+
+
+@router.get("/messages/pending", response_model=list[PendingMessageResponse])
+async def list_pending_messages(
+    admin: Admin = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+    limit: int = Query(100, ge=1, le=500),
+):
+    """Messages waiting for admin review, oldest-first.
+
+    Surfaces inbound rows where approval_state='pending' across all shops
+    currently in moderation_mode='pending'. Joined with shops +
+    conversations so the queue UI can show shop name + platform + the
+    customer identifier without per-row lookups.
+    """
+    stmt = (
+        select(Message, Conversation, Shop)
+        .join(Conversation, Message.conversation_id == Conversation.id)
+        .join(Shop, Conversation.shop_id == Shop.id)
+        .where(Message.approval_state == "pending")
+        .order_by(Message.created_at.asc())
+        .limit(limit)
+    )
+    result = await db.execute(stmt)
+    rows = result.all()
+    return [
+        PendingMessageResponse(
+            id=msg.id,
+            shop_id=shop.id,
+            shop_name=shop.name,
+            conversation_id=convo.id,
+            platform=convo.platform,
+            customer_id=convo.customer_id,
+            content=msg.content,
+            created_at=msg.created_at,
+        )
+        for msg, convo, shop in rows
+    ]
+
+
+@router.get("/messages/pending/count")
+async def count_pending_messages(
+    admin: Admin = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Cheap count for the sidebar badge — returns just {count: int}."""
+    result = await db.execute(
+        select(func.count())
+        .select_from(Message)
+        .where(Message.approval_state == "pending")
+    )
+    return {"count": int(result.scalar() or 0)}
+
+
+@router.post("/messages/{message_id}/approve")
+async def approve_pending_message(
+    message_id: uuid.UUID,
+    admin: Admin = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Approve a pending message — runs the full AI reply pipeline.
+
+    Idempotent on the message state: if it's not actually pending anymore
+    (someone else already acted on it), return 409.
+    """
+    msg_row = await db.execute(select(Message).where(Message.id == message_id))
+    msg = msg_row.scalar_one_or_none()
+    if not msg:
+        raise HTTPException(status_code=404, detail="Message not found")
+    if msg.approval_state != "pending":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Message is not pending (current state: {msg.approval_state})",
+        )
+
+    convo_row = await db.execute(
+        select(Conversation).where(Conversation.id == msg.conversation_id)
+    )
+    convo = convo_row.scalar_one_or_none()
+    if not convo:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    shop_row = await db.execute(select(Shop).where(Shop.id == convo.shop_id))
+    shop = shop_row.scalar_one_or_none()
+    if not shop or not shop.is_active:
+        raise HTTPException(status_code=409, detail="Shop is inactive — cannot reply")
+
+    # Flip state first so a concurrent approve request 409s
+    msg.approval_state = "approved"
+    await db.flush()
+
+    # Load history EXCLUDING the just-approved message itself —
+    # run_ai_reply_stage injects the current text separately as the user
+    # turn, so including it in history would duplicate it in Gemini's context.
+    full_history = await get_recent_messages(db, convo.id)
+    history = [
+        h for h in full_history
+        if h.get("content") != msg.content or h.get("direction") != "inbound"
+    ][:-1] if any(h.get("content") == msg.content for h in full_history) else full_history
+
+    await run_ai_reply_stage(
+        db=db,
+        shop=shop,
+        convo=convo,
+        customer_id=convo.customer_id,
+        text=msg.content,
+        history=history,
+        platform=convo.platform,
+    )
+
+    return {"id": str(msg.id), "approval_state": "approved"}
+
+
+@router.post("/messages/{message_id}/reject")
+async def reject_pending_message(
+    message_id: uuid.UUID,
+    admin: Admin = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Reject a pending message — no reply is ever sent.
+
+    Keeps the row for audit.
+    """
+    msg_row = await db.execute(select(Message).where(Message.id == message_id))
+    msg = msg_row.scalar_one_or_none()
+    if not msg:
+        raise HTTPException(status_code=404, detail="Message not found")
+    if msg.approval_state != "pending":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Message is not pending (current state: {msg.approval_state})",
+        )
+
+    msg.approval_state = "rejected"
+    await db.flush()
+    return {"id": str(msg.id), "approval_state": "rejected"}
 
 
 # ─── Analytics ──────────────────────────────────────────────────────────────

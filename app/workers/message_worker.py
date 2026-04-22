@@ -262,6 +262,120 @@ async def save_message(
     return msg
 
 
+async def run_ai_reply_stage(
+    db: AsyncSession,
+    shop: Shop,
+    convo: Conversation,
+    customer_id: str,
+    text: str,
+    history: list[dict],
+    platform: str,
+) -> None:
+    """Run the AI pipeline on an inbound message and publish the outbound reply.
+
+    Shared between the auto-path in process_message and the admin
+    /messages/{id}/approve endpoint so approved messages go through the
+    exact same code as automatically-handled ones.
+
+    Assumes the inbound message has already been saved. Commits the
+    outbound reply + any sentiment/handoff changes to `db`, publishes SSE
+    events, and pushes to the outbound RabbitMQ queue.
+    """
+    context = await get_shop_context(db, shop)
+    visit_start_iso = (
+        convo.current_visit_started_at.isoformat()
+        if convo.current_visit_started_at
+        else None
+    )
+    result = await ai_pipeline.process(
+        context=context,
+        conversation_id=str(convo.id),
+        customer_id=customer_id,
+        text=text,
+        history=history,
+        db=db,
+        shop_id=str(shop.id),
+        platform=platform,
+        visit_started_at=visit_start_iso,
+    )
+
+    # Sentiment tracking — count only current-visit inbound messages so the
+    # locking threshold ('initial' becomes sticky after 3 messages) is stable.
+    if visit_start_iso:
+        has_timestamps = any(m.get("created_at") for m in history)
+        if has_timestamps:
+            visit_inbound = [
+                m for m in history
+                if m.get("direction") == "inbound"
+                and m.get("created_at")
+                and m["created_at"] >= visit_start_iso
+            ]
+            inbound_count = len(visit_inbound) + 1
+        else:
+            inbound_count = len([m for m in history if m.get("direction") == "inbound"]) + 1
+    else:
+        inbound_count = len([m for m in history if m.get("direction") == "inbound"]) + 1
+    if result.initial_sentiment:
+        if not convo.initial_sentiment or inbound_count <= 3:
+            convo.initial_sentiment = result.initial_sentiment
+    if result.current_sentiment:
+        convo.current_sentiment = result.current_sentiment
+
+    locked_initial = convo.initial_sentiment if inbound_count > 3 else ""
+
+    await redis_client.track_message_processed(
+        shop_id=str(shop.id),
+        response_time_ms=result.response_time_ms,
+        was_escalated=result.handoff_needed,
+        current_sentiment=result.current_sentiment,
+        initial_sentiment=locked_initial,
+        hour=datetime.now(timezone.utc).hour,
+    )
+
+    # AI degradation signal — silent fallback replies aren't great but at
+    # least the owner dashboard shows a banner.
+    if await redis_client.is_circuit_open("gemini"):
+        await redis_client.publish_event(str(shop.id), {
+            "type": "ai_degraded",
+            "service": "gemini",
+        })
+
+    if result.handoff_needed:
+        reason = result.handoff_reason or f"رسالة العميل: {text}"
+        await trigger_handoff(db, str(convo.id), reason=reason)
+        reply = HANDOFF_REPLY
+
+        await redis_client.publish_event(str(shop.id), {
+            "type": "handoff_triggered",
+            "conversation_id": str(convo.id),
+            "customer_id": customer_id,
+            "platform": platform,
+            "reason": reason,
+        })
+    else:
+        reply = result.reply
+
+    outbound_msg = await save_message(db, convo.id, "outbound", reply, "ai")
+    await db.commit()
+
+    await redis_client.publish_event(str(shop.id), {
+        "type": "new_message",
+        "direction": "outbound",
+        "conversation_id": str(convo.id),
+        "sender_type": "ai",
+        "preview": reply[:100],
+    })
+
+    await rabbitmq.publish(OUTBOUND_QUEUE, {
+        "conversation_id": str(convo.id),
+        "platform": platform,
+        "customer_id": customer_id,
+        "shop_id": str(shop.id),
+        "reply": reply,
+        "message_id": str(outbound_msg.id),
+    })
+
+
 async def process_message(msg: dict) -> None:
     """Process a single inbound message from the queue."""
     platform = msg["platform"]
@@ -355,112 +469,53 @@ async def process_message(msg: dict) -> None:
                         await db.commit()
                     continue
 
-                # Run the AI pipeline — handles prompt composition, parallel
-                # Gemini + sentiment calls, handoff extraction, and timing.
-                context = await get_shop_context(db, shop)
-                visit_start_iso = (
-                    convo.current_visit_started_at.isoformat()
-                    if convo.current_visit_started_at
-                    else None
-                )
-                result = await ai_pipeline.process(
-                    context=context,
-                    conversation_id=str(convo.id),
-                    customer_id=customer_id,
-                    text=text,
-                    history=history,
-                    db=db,
-                    shop_id=str(shop.id),
-                    platform=platform,
-                    visit_started_at=visit_start_iso,
-                )
+                # Moderation mode: queue for admin approval instead of
+                # running the AI pipeline. The inbound message is already
+                # saved; we just flag it and notify admin.
+                if (shop.moderation_mode or "auto") == "pending":
+                    # Re-fetch the just-saved inbound row to flag it. We
+                    # save_message() returns the object but we didn't bind it
+                    # above — easier to tag through the outbound flow change.
+                    from sqlalchemy import select as _select
+                    last_inbound = (
+                        await db.execute(
+                            _select(Message)
+                            .where(
+                                Message.conversation_id == convo.id,
+                                Message.direction == "inbound",
+                            )
+                            .order_by(Message.created_at.desc())
+                            .limit(1)
+                        )
+                    ).scalar_one_or_none()
+                    if last_inbound is not None:
+                        last_inbound.approval_state = "pending"
+                    await db.commit()
 
-                # Store sentiment on conversation (Sentiment V2: dual tracking)
-                # Count only current-visit inbound messages for locking threshold
-                visit_start_str = visit_start_iso
-                if visit_start_str:
-                    has_timestamps = any(m.get("created_at") for m in history)
-                    if has_timestamps:
-                        visit_inbound = [
-                            m for m in history
-                            if m.get("direction") == "inbound"
-                            and m.get("created_at")
-                            and m["created_at"] >= visit_start_str
-                        ]
-                        inbound_count = len(visit_inbound) + 1
-                    else:
-                        # Old cache without timestamps — count all as fallback
-                        inbound_count = len([m for m in history if m.get("direction") == "inbound"]) + 1
-                else:
-                    inbound_count = len([m for m in history if m.get("direction") == "inbound"]) + 1
-                if result.initial_sentiment:
-                    if not convo.initial_sentiment or inbound_count <= 3:
-                        convo.initial_sentiment = result.initial_sentiment
-                if result.current_sentiment:
-                    convo.current_sentiment = result.current_sentiment
-
-                # Only track transitions when initial_sentiment is locked (>3 messages)
-                # to avoid per-message overcounting
-                locked_initial = convo.initial_sentiment if inbound_count > 3 else ""
-
-                # Track analytics in Redis
-                await redis_client.track_message_processed(
-                    shop_id=str(shop.id),
-                    response_time_ms=result.response_time_ms,
-                    was_escalated=result.handoff_needed,
-                    current_sentiment=result.current_sentiment,
-                    initial_sentiment=locked_initial,
-                    hour=datetime.now(timezone.utc).hour,
-                )
-
-                # AI degradation signal: if Gemini's circuit breaker is open
-                # the pipeline just served a canned fallback. Notify the shop
-                # owner so they can take over rather than letting generic
-                # replies go out silently.
-                if await redis_client.is_circuit_open("gemini"):
-                    await redis_client.publish_event(str(shop.id), {
-                        "type": "ai_degraded",
-                        "service": "gemini",
-                    })
-
-                if result.handoff_needed:
-                    reason = result.handoff_reason or f"رسالة العميل: {text}"
-                    await trigger_handoff(db, str(convo.id), reason=reason)
-                    reply = HANDOFF_REPLY
-
-                    # Publish handoff event for SSE
-                    await redis_client.publish_event(str(shop.id), {
-                        "type": "handoff_triggered",
+                    await redis_client.publish_event("admin", {
+                        "type": "pending_message_added",
+                        "shop_id": str(shop.id),
                         "conversation_id": str(convo.id),
                         "customer_id": customer_id,
                         "platform": platform,
-                        "reason": reason,
+                        "preview": text[:100],
                     })
-                else:
-                    reply = result.reply
+                    logger.info(
+                        "Message queued for admin approval shop=%s convo=%s",
+                        shop.id, convo.id,
+                    )
+                    continue
 
-                # Save outbound message
-                outbound_msg = await save_message(db, convo.id, "outbound", reply, "ai")
-                await db.commit()
-
-                # Publish outbound event for SSE
-                await redis_client.publish_event(str(shop.id), {
-                    "type": "new_message",
-                    "direction": "outbound",
-                    "conversation_id": str(convo.id),
-                    "sender_type": "ai",
-                    "preview": reply[:100],
-                })
-
-                # Push to outbound queue (after commit so DB state is consistent)
-                await rabbitmq.publish(OUTBOUND_QUEUE, {
-                    "conversation_id": str(convo.id),
-                    "platform": platform,
-                    "customer_id": customer_id,
-                    "shop_id": str(shop.id),
-                    "reply": reply,
-                    "message_id": str(outbound_msg.id),
-                })
+                # Auto mode — run AI pipeline + send reply (today's default).
+                await run_ai_reply_stage(
+                    db=db,
+                    shop=shop,
+                    convo=convo,
+                    customer_id=customer_id,
+                    text=text,
+                    history=history,
+                    platform=platform,
+                )
 
                 logger.info(
                     "Processed message for shop=%s convo=%s", shop.id, convo.id

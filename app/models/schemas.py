@@ -42,6 +42,9 @@ class Shop(Base):
     wa_access_token = Column(Text, nullable=True)  # stored encrypted
     token_expires_at = Column(DateTime(timezone=True), nullable=True)
     is_active = Column(Boolean, default=True)
+    # 'auto' = today's default (AI replies immediately),
+    # 'pending' = inbound messages queue for admin approval before AI runs.
+    moderation_mode = Column(String(20), nullable=False, server_default="auto")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     logo_url = Column(String(500), nullable=True)
@@ -146,6 +149,9 @@ class Message(Base):
     sender_type = Column(String(10), nullable=True)  # 'customer', 'ai', 'human'
     meta_message_id = Column(String(255), nullable=True)
     status = Column(String(20), default="pending")  # 'pending', 'sent', 'failed'
+    # Only set on inbound messages for shops in 'pending' moderation mode.
+    # Values: 'pending' | 'approved' | 'rejected'. NULL = not applicable.
+    approval_state = Column(String(20), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     conversation = relationship("Conversation", back_populates="messages")
@@ -278,6 +284,7 @@ class ShopUpdate(BaseModel):
     wa_waba_id: Optional[str] = None
     wa_access_token: Optional[str] = None
     is_active: Optional[bool] = None
+    moderation_mode: Optional[str] = Field(None, pattern="^(auto|pending)$")
     logo_url: Optional[str] = None
     brand_color: Optional[str] = None
     splash_text: Optional[str] = None
@@ -292,9 +299,24 @@ class ShopResponse(BaseModel):
     wa_phone_number_id: Optional[str] = None
     wa_waba_id: Optional[str] = None
     is_active: bool
+    moderation_mode: str = "auto"
     logo_url: Optional[str] = None
     brand_color: Optional[str] = None
     splash_text: Optional[str] = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class PendingMessageResponse(BaseModel):
+    """One entry in the admin moderation queue."""
+    id: uuid.UUID
+    shop_id: uuid.UUID
+    shop_name: str
+    conversation_id: uuid.UUID
+    platform: str
+    customer_id: str
+    content: str
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -532,6 +554,7 @@ class AdminShopResponse(BaseModel):
     wa_phone_number_id: Optional[str] = None
     wa_waba_id: Optional[str] = None
     is_active: bool
+    moderation_mode: str = "auto"
     logo_url: Optional[str] = None
     brand_color: Optional[str] = None
     splash_text: Optional[str] = None
