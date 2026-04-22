@@ -51,7 +51,7 @@ from app.services.storage import upload_logo, delete_logo
 from app.services.export import messages_to_csv, analytics_to_csv
 from app.services.meta_verify import verify_ig_credentials, verify_wa_credentials
 from app.services.shop_auth import (
-    hash_password,
+    hash_password as hash_shop_password,
     is_valid_email,
     validate_password_strength,
     generate_temp_password,
@@ -402,7 +402,7 @@ async def set_shop_credentials(
         raise HTTPException(status_code=409, detail="Email is already in use")
 
     shop.email = email
-    shop.password_hash = hash_password(temp_password)
+    shop.password_hash = hash_shop_password(temp_password)
     shop.must_change_password = True
 
     try:

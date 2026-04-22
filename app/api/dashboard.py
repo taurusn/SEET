@@ -23,7 +23,6 @@ from app.models.schemas import (
     HandoffRequest,
     CompensationTier,
     Voucher,
-    ShopCreate,
     ShopLogin,
     ShopPasswordChange,
     ShopUpdate,
@@ -61,7 +60,6 @@ from app.api.auth import (
     get_current_shop_id,
     get_current_token_payload,
     create_access_token,
-    decode_token,
     TokenResponse,
     TokenPayload,
 )
