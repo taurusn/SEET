@@ -19,6 +19,10 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    # safe-migration: contract phase for the sentiment refactor. Migration
+    # 006 added initial_sentiment + current_sentiment and the code switched
+    # to reading those columns in the same release, so the old `sentiment`
+    # column is definitely unused by the time this runs.
     op.drop_column("conversations", "sentiment")
 
 

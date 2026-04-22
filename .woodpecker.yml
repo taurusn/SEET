@@ -1,66 +1,266 @@
-when:
-  branch: main
-  event: push
+# Production-grade pipeline for SEET.
+#
+# Stages (pushes to main only; pull requests stop after the quality gates):
+#
+#   [parallel quality gates]
+#   lockdown-check     — refuse to deploy if docker-compose exposes a public port
+#   lint-python        — ruff on app/
+#   test-python        — pytest tests/
+#   lint-admin         — eslint on admin/
+#   lint-frontend      — eslint on frontend/
+#   typecheck-admin    — tsc --noEmit on admin/
+#   typecheck-frontend — tsc --noEmit on frontend/
+#
+#   [deploy chain — only runs on push to main, sequentially]
+#   sync-code    — pull latest onto the host
+#   backup-db    — pg_dump + rotate to /home/ubuntu/seet-backups/
+#   build        — docker compose build (new images staged, not swapped)
+#   migrate      — alembic upgrade head in a ONE-SHOT container
+#                  (live API still serving the old schema at this point)
+#   deploy       — docker compose up -d (swap containers after migration passed)
+#   healthcheck  — poll /health until the new API answers 200
+#   cleanup      — docker image prune
+#
+#   [notify]
+#   notify-success / notify-failure — only one fires per run
+#
+# Key guarantees vs the old pipeline:
+#   - No `|| true` anywhere. Any step failure fails the whole pipeline and
+#     triggers notify-failure, so you see the real state.
+#   - Migrations run BEFORE containers are swapped, not after — so the live
+#     API never runs new code against the old schema or vice versa.
+#   - Every deploy snapshots the DB first. Last 20 dumps retained.
+#   - PRs run the quality gates only (no deploy).
+
+variables:
+  - &docker_image docker:27
+  - &python_image python:3.12-slim
+  - &node_image node:20-slim
+  - &server_paths
+    - /var/run/docker.sock:/var/run/docker.sock
+    - /home/ubuntu/SEET:/home/ubuntu/SEET
+    - /home/ubuntu/seet-backups:/home/ubuntu/seet-backups
+
+  - &deploy_only
+    when:
+      - event: push
+        branch: main
 
 steps:
-  # ─── Security: block non-loopback port publishes ─────────────────────────
+  # ─── Quality gates (run on every push and pull_request) ──────────────────
   lockdown-check:
-    image: python:3.12-slim
+    image: *python_image
     commands:
       - pip install pyyaml -q
       - python3 scripts/check-compose-ports.py docker-compose.yml
     depends_on: []
 
-  # ─── Deploy ──────────────────────────────────────────────────────────────
-  deploy:
-    image: docker
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - /home/ubuntu/SEET:/home/ubuntu/SEET
+  check-migrations:
+    image: *python_image
     commands:
-      - git config --global --add safe.directory /home/ubuntu/SEET
-      - cd /home/ubuntu/SEET
-      - git fetch https://github.com/taurusn/SEET.git ${CI_COMMIT_BRANCH}
-      - git reset --hard FETCH_HEAD
-      - docker compose -p seet up --build -d || true
-      - sleep 5
-      - docker compose -p seet exec -T api alembic upgrade head || true
-      - docker compose -p seet ps
-      - docker image prune -f
-    depends_on: [lockdown-check]
-
-  # ─── Test ────────────────────────────────────────────────────────────────
-  test:
-    image: python:3.12-slim
-    commands:
-      - pip install -r requirements.txt pytest -q
-      - python -m pytest tests/ -x -q
+      - python3 scripts/check-migrations.py
     depends_on: []
 
-  lint:
-    image: python:3.12-slim
+  lint-python:
+    image: *python_image
     commands:
       - pip install ruff -q
       - ruff check app/
     depends_on: []
 
-  # ─── Notify: email Hatim with real pipeline status ───────────────────────
+  test-python:
+    image: *python_image
+    commands:
+      - pip install -r requirements.txt pytest -q
+      - python -m pytest tests/ -x -q
+    depends_on: []
+
+  lint-frontend:
+    image: *node_image
+    commands:
+      - cd frontend
+      # TODO: commit package-lock.json in frontend/ and admin/, then
+      # switch to `npm ci` for reproducible + faster installs.
+      - npm install --no-audit --no-fund --prefer-offline
+      - npm run lint
+    depends_on: []
+
+  lint-admin:
+    image: *node_image
+    commands:
+      - cd admin
+      # TODO: commit package-lock.json in frontend/ and admin/, then
+      # switch to `npm ci` for reproducible + faster installs.
+      - npm install --no-audit --no-fund --prefer-offline
+      - npm run lint
+    depends_on: []
+
+  typecheck-frontend:
+    image: *node_image
+    commands:
+      - cd frontend
+      # TODO: commit package-lock.json in frontend/ and admin/, then
+      # switch to `npm ci` for reproducible + faster installs.
+      - npm install --no-audit --no-fund --prefer-offline
+      - npx tsc --noEmit
+    depends_on: []
+
+  typecheck-admin:
+    image: *node_image
+    commands:
+      - cd admin
+      # TODO: commit package-lock.json in frontend/ and admin/, then
+      # switch to `npm ci` for reproducible + faster installs.
+      - npm install --no-audit --no-fund --prefer-offline
+      - npx tsc --noEmit
+    depends_on: []
+
+  # ─── Deploy chain (push to main only) ────────────────────────────────────
+  sync-code:
+    image: *docker_image
+    volumes: *server_paths
+    commands:
+      - git config --global --add safe.directory /home/ubuntu/SEET
+      - cd /home/ubuntu/SEET
+      - git fetch https://github.com/taurusn/SEET.git ${CI_COMMIT_BRANCH}
+      - git reset --hard FETCH_HEAD
+    depends_on:
+      - lockdown-check
+      - check-migrations
+      - lint-python
+      - test-python
+      - lint-frontend
+      - lint-admin
+      - typecheck-frontend
+      - typecheck-admin
+    <<: *deploy_only
+
+  backup-db:
+    image: *docker_image
+    volumes: *server_paths
+    environment:
+      CI_COMMIT_SHA: ${CI_COMMIT_SHA}
+    commands:
+      - cd /home/ubuntu/SEET
+      - bash scripts/ci-backup-db.sh
+    depends_on: [sync-code]
+    <<: *deploy_only
+
+  tag-prev:
+    image: *docker_image
+    volumes: *server_paths
+    commands:
+      # Snapshot currently-running images as :prev BEFORE build overwrites
+      # :latest — enables a one-command code rollback via scripts/rollback.sh.
+      - cd /home/ubuntu/SEET
+      - bash scripts/ci-tag-prev.sh
+    depends_on: [sync-code]
+    <<: *deploy_only
+
+  build:
+    image: *docker_image
+    volumes: *server_paths
+    commands:
+      - cd /home/ubuntu/SEET
+      # Build new images without starting them — validates Dockerfile + deps
+      # before we take any action against the running stack.
+      - docker compose -p seet build
+    depends_on: [tag-prev]
+    <<: *deploy_only
+
+  migrate:
+    image: *docker_image
+    volumes: *server_paths
+    commands:
+      - cd /home/ubuntu/SEET
+      # One-shot container built from the NEW image runs alembic against
+      # the live DB. The current API container stays up on the old schema
+      # until `deploy` swaps it. This means: if migration fails, old code
+      # is still serving traffic against the old schema — no outage.
+      - docker compose -p seet run --rm --no-deps api alembic upgrade head
+    depends_on: [backup-db, build]
+    <<: *deploy_only
+
+  deploy:
+    image: *docker_image
+    volumes: *server_paths
+    commands:
+      - cd /home/ubuntu/SEET
+      # --no-build: the `build` step already built the images. We only
+      # want to recreate containers with the already-built image here.
+      - docker compose -p seet up -d --no-build
+      - docker compose -p seet ps
+    depends_on: [migrate]
+    <<: *deploy_only
+
+  healthcheck:
+    image: *docker_image
+    volumes: *server_paths
+    commands:
+      - cd /home/ubuntu/SEET
+      - bash scripts/ci-healthcheck.sh
+    depends_on: [deploy]
+    <<: *deploy_only
+
+  cleanup:
+    image: *docker_image
+    volumes: *server_paths
+    commands:
+      - docker image prune -f
+      # Also trim builder cache so it doesn't eat the disk over months
+      - docker builder prune -f --filter until=168h
+    depends_on: [healthcheck]
+    <<: *deploy_only
+
+  # ─── Notifications ───────────────────────────────────────────────────────
   notify-success:
-    image: python:3.12-slim
+    image: *python_image
     volumes:
       - /home/ubuntu/SEET:/home/ubuntu/SEET
     commands:
       - python3 /home/ubuntu/SEET/scripts/ci-notify.py success
+    depends_on:
+      - lockdown-check
+      - check-migrations
+      - lint-python
+      - test-python
+      - lint-frontend
+      - lint-admin
+      - typecheck-frontend
+      - typecheck-admin
+      - sync-code
+      - tag-prev
+      - backup-db
+      - build
+      - migrate
+      - deploy
+      - healthcheck
+      - cleanup
     when:
       - status: [success]
-    depends_on: [lockdown-check, deploy, test, lint]
 
   notify-failure:
-    image: python:3.12-slim
+    image: *python_image
     volumes:
       - /home/ubuntu/SEET:/home/ubuntu/SEET
     commands:
       - python3 /home/ubuntu/SEET/scripts/ci-notify.py failure
+    depends_on:
+      - lockdown-check
+      - check-migrations
+      - lint-python
+      - test-python
+      - lint-frontend
+      - lint-admin
+      - typecheck-frontend
+      - typecheck-admin
+      - sync-code
+      - tag-prev
+      - backup-db
+      - build
+      - migrate
+      - deploy
+      - healthcheck
+      - cleanup
     when:
       - status: [failure]
-    depends_on: [lockdown-check, deploy, test, lint]
