@@ -44,7 +44,7 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
 
     if (token && adminStr) {
       try {
-        const admin = JSON.parse(adminStr);
+        JSON.parse(adminStr); // validate JSON shape; fresh value comes from /me
         // Validate token is not expired by calling /me
         api
           .get<AdminUser>("/api/v1/admin/me")

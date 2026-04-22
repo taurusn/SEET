@@ -37,8 +37,6 @@ export function ContextEditor({ contexts, onUpdate }: ContextEditorProps) {
   const [newType, setNewType] = useState("menu");
   const [newContent, setNewContent] = useState("");
 
-  const existingTypes = new Set(contexts.map((c) => c.context_type));
-
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault();
     await api.post("/api/v1/shop/context", {

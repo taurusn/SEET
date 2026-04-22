@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { api } from "@/lib/api";
-import { Plus, Pencil, Trash2, X, Check } from "lucide-react";
+import { Plus, Trash2, X, Check } from "lucide-react";
 
 interface Tier {
   id: string;
@@ -21,7 +21,6 @@ interface CompensationTierFormProps {
 
 export function CompensationTierForm({ tiers, onUpdate }: CompensationTierFormProps) {
   const [adding, setAdding] = useState(false);
-  const [editing, setEditing] = useState<string | null>(null);
   const [form, setForm] = useState({
     label: "",
     description: "",

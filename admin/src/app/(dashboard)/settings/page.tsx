@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useAdmin } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
-import { CheckCircle, Plus, Shield, Eye } from "lucide-react";
+import { Plus, Shield, Eye } from "lucide-react";
 
 interface AdminUser {
   id: string;
