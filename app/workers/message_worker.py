@@ -492,6 +492,11 @@ async def process_message(msg: dict) -> None:
                         last_inbound.approval_state = "pending"
                     await db.commit()
 
+                    # Forward-looking: admin SSE isn't wired yet (admin UI
+                    # polls /messages/pending/count every 10s), but publish
+                    # to a canonical channel so when it lands later, the
+                    # moderation page flips to real-time with zero worker
+                    # changes. No subscribers = Redis drops the message.
                     await redis_client.publish_event("admin", {
                         "type": "pending_message_added",
                         "shop_id": str(shop.id),

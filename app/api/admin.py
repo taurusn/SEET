@@ -779,14 +779,21 @@ async def approve_pending_message(
     msg.approval_state = "approved"
     await db.flush()
 
-    # Load history EXCLUDING the just-approved message itself —
-    # run_ai_reply_stage injects the current text separately as the user
-    # turn, so including it in history would duplicate it in Gemini's context.
+    # Load history STRICTLY BEFORE the approved message —
+    # run_ai_reply_stage injects msg.content separately as the user turn,
+    # so including it in history would duplicate. Filter by created_at so
+    # repeated-content messages ("hi", "hi") don't trip a content-match.
+    cutoff_iso = msg.created_at.isoformat() if msg.created_at else None
     full_history = await get_recent_messages(db, convo.id)
-    history = [
-        h for h in full_history
-        if h.get("content") != msg.content or h.get("direction") != "inbound"
-    ][:-1] if any(h.get("content") == msg.content for h in full_history) else full_history
+    if cutoff_iso:
+        history = [
+            h for h in full_history
+            if h.get("created_at") and h["created_at"] < cutoff_iso
+        ]
+    else:
+        # No timestamp (shouldn't happen for a real row) — fall back to
+        # dropping the last inbound that matches this message's content.
+        history = full_history[:-1] if full_history else []
 
     await run_ai_reply_stage(
         db=db,
