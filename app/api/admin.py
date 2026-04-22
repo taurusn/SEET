@@ -493,11 +493,12 @@ async def toggle_shop(
     admin: Admin = Depends(require_role("admin", "superadmin")),
     db: AsyncSession = Depends(get_db),
 ):
-    """Deactivate a shop.
+    """Flip a shop's is_active flag.
 
-    Activation MUST go through POST /shops/{shop_id}/accept so Meta
-    credentials are re-verified server-side. This endpoint refuses to
-    flip an inactive shop back on — doing so would bypass verification.
+    The standard onboarding path is POST /shops/{shop_id}/accept, which
+    re-verifies Meta credentials server-side. This endpoint is an admin
+    override: it flips is_active in either direction without verification,
+    for cases where the shop needs to be toggled on/off manually.
     """
     stmt = select(Shop).where(Shop.id == shop_id)
     result = await db.execute(stmt)
@@ -505,13 +506,7 @@ async def toggle_shop(
     if not shop:
         raise HTTPException(status_code=404, detail="Shop not found")
 
-    if not shop.is_active:
-        raise HTTPException(
-            status_code=400,
-            detail="Cannot activate via /toggle — use /accept so credentials are re-verified.",
-        )
-
-    shop.is_active = False
+    shop.is_active = not shop.is_active
     await db.flush()
     await redis_client.invalidate_shop_context(str(shop.id))
     return {"id": str(shop.id), "is_active": shop.is_active}

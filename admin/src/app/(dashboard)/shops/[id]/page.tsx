@@ -276,13 +276,13 @@ export default function ShopDetailPage() {
     }
   };
 
-  const deactivateShop = async () => {
+  const toggleShop = async () => {
     setError("");
     try {
       await api.post(`/api/v1/admin/shops/${id}/toggle`);
       await loadShop();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to deactivate");
+      setError(e instanceof Error ? e.message : "Failed to toggle status");
     }
   };
 
@@ -493,14 +493,17 @@ export default function ShopDetailPage() {
             <KeyRound className="w-3.5 h-3.5" />
             Set login credentials
           </button>
-          {shop.is_active ? (
-            <button
-              onClick={deactivateShop}
-              className="px-4 py-2 rounded-lg text-sm font-medium bg-danger/10 text-danger hover:bg-danger/20 transition-colors"
-            >
-              Deactivate
-            </button>
-          ) : null}
+          <button
+            onClick={toggleShop}
+            className={cn(
+              "px-4 py-2 rounded-lg text-sm font-medium transition-colors",
+              shop.is_active
+                ? "bg-danger/10 text-danger hover:bg-danger/20"
+                : "bg-success/10 text-success hover:bg-success/20",
+            )}
+          >
+            {shop.is_active ? "Deactivate" : "Activate"}
+          </button>
         </div>
       </div>
 
