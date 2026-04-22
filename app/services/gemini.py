@@ -1,8 +1,8 @@
-import asyncio
 import logging
 import re
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 from app.config import get_settings
 from app.services.redis_client import redis_client
@@ -156,13 +156,13 @@ class GeminiService:
     """Gemini LLM integration with circuit breaker pattern."""
 
     def __init__(self):
-        self._configured = False
+        self._client: genai.Client | None = None
 
-    def _ensure_configured(self) -> None:
-        if not self._configured:
+    def _get_client(self) -> genai.Client:
+        if self._client is None:
             settings = get_settings()
-            genai.configure(api_key=settings.gemini_api_key)
-            self._configured = True
+            self._client = genai.Client(api_key=settings.gemini_api_key)
+        return self._client
 
     async def generate_reply(
         self,
@@ -181,7 +181,7 @@ class GeminiService:
             logger.warning("Gemini circuit breaker is OPEN, returning fallback")
             return FALLBACK_REPLY
 
-        self._ensure_configured()
+        client = self._get_client()
         settings = get_settings()
 
         # Build conversation summary for long chats and inject into system prompt
@@ -210,7 +210,7 @@ class GeminiService:
         # Send only last GEMINI_WINDOW messages to Gemini
         recent = history[-GEMINI_WINDOW:]
         contents = self._format_history(recent) + [
-            {"role": "user", "parts": [enriched_message]}
+            {"role": "user", "parts": [{"text": enriched_message}]}
         ]
 
         # Gemini requires first entry to be "user" — drop leading model entries
@@ -221,7 +221,7 @@ class GeminiService:
         # Merge consecutive user entries at boundary between history and
         # current message (can happen after worker crash recovery)
         if len(contents) >= 2 and contents[-2]["role"] == "user":
-            contents[-2]["parts"][0] += "\n" + contents[-1]["parts"][0]
+            contents[-2]["parts"][0]["text"] += "\n" + contents[-1]["parts"][0]["text"]
             contents.pop()
 
         logger.info(
@@ -230,36 +230,47 @@ class GeminiService:
         )
 
         try:
-            model = genai.GenerativeModel(
-                model_name=settings.gemini_model,
-                system_instruction=system_prompt,
-                generation_config=genai.GenerationConfig(
+            response = await client.aio.models.generate_content(
+                model=settings.gemini_model,
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_prompt,
                     temperature=0.3,
                     top_p=0.8,
                     top_k=40,
-                    max_output_tokens=256,
+                    max_output_tokens=1024,
+                    # gemini-flash-latest currently resolves to Gemini 3 Flash,
+                    # a thinking model. Thinking tokens count against
+                    # max_output_tokens — MINIMAL keeps the budget for the
+                    # actual reply. Without this, replies get truncated
+                    # mid-word because thinking eats all the tokens.
+                    thinking_config=types.ThinkingConfig(
+                        thinking_level=types.ThinkingLevel.MINIMAL,
+                    ),
                 ),
             )
-            # Run blocking Gemini call in a thread to avoid blocking the event loop
-            response = await asyncio.to_thread(model.generate_content, contents)
 
             # Handle prompt-level safety blocks
-            if hasattr(response, "prompt_feedback") and response.prompt_feedback:
-                block_reason = getattr(response.prompt_feedback, "block_reason", None)
-                if block_reason:
-                    logger.warning("Gemini prompt blocked (reason=%s)", block_reason)
-                    return FALLBACK_REPLY
+            if response.prompt_feedback and response.prompt_feedback.block_reason:
+                logger.warning(
+                    "Gemini prompt blocked (reason=%s)",
+                    response.prompt_feedback.block_reason,
+                )
+                return FALLBACK_REPLY
 
-            # Handle response-level safety blocks (not a service failure)
             if response.candidates:
                 finish_reason = response.candidates[0].finish_reason
-                if finish_reason is not None and hasattr(finish_reason, "name"):
-                    if finish_reason.name in ("SAFETY", "RECITATION"):
-                        logger.warning(
-                            "Gemini content blocked (reason=%s)",
-                            finish_reason.name,
-                        )
+                if finish_reason is not None:
+                    name = getattr(finish_reason, "name", str(finish_reason))
+                    if name in ("SAFETY", "RECITATION"):
+                        logger.warning("Gemini content blocked (reason=%s)", name)
                         return FALLBACK_REPLY
+                    if name == "MAX_TOKENS":
+                        # Reply is valid but got cut off — log so we notice.
+                        logger.warning(
+                            "Gemini reply hit MAX_TOKENS cap — raise max_output_tokens "
+                            "or thinking budget if this keeps happening",
+                        )
 
             reply_text = response.text
             if not reply_text or not reply_text.strip():
@@ -305,7 +316,7 @@ class GeminiService:
 
     async def _summarize_history(self, messages: list[dict]) -> str:
         """Use Gemini to produce a short Arabic summary of older messages."""
-        self._ensure_configured()
+        client = self._get_client()
         settings = get_settings()
 
         conversation_text = "\n".join(
@@ -320,17 +331,18 @@ class GeminiService:
         )
 
         try:
-            model = genai.GenerativeModel(
-                model_name=settings.gemini_model,
-                generation_config=genai.GenerationConfig(
+            response = await client.aio.models.generate_content(
+                model=settings.gemini_model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
                     temperature=0.2,
-                    max_output_tokens=150,
+                    max_output_tokens=512,
+                    thinking_config=types.ThinkingConfig(
+                        thinking_level=types.ThinkingLevel.MINIMAL,
+                    ),
                 ),
             )
-            response = await asyncio.to_thread(
-                model.generate_content, [{"role": "user", "parts": [prompt]}]
-            )
-            summary = self._clean_response(response.text)
+            summary = self._clean_response(response.text or "")
             logger.info("Conversation summary generated: '%s'", summary[:80])
             return summary
         except Exception as e:
@@ -386,9 +398,9 @@ class GeminiService:
             content = msg.get("content", "")
             if formatted and formatted[-1]["role"] == role:
                 # Merge into previous entry to maintain alternating roles
-                formatted[-1]["parts"][0] += "\n" + content
+                formatted[-1]["parts"][0]["text"] += "\n" + content
             else:
-                formatted.append({"role": role, "parts": [content]})
+                formatted.append({"role": role, "parts": [{"text": content}]})
         return formatted
 
 

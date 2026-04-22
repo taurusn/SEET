@@ -7,12 +7,12 @@ Analyzes the customer's initial mood (why they reached out) and current mood
 Runs via asyncio.gather() alongside the main Gemini call — zero extra latency.
 """
 
-import asyncio
 import json
 import logging
 from dataclasses import dataclass
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 from app.config import get_settings
 
@@ -34,7 +34,7 @@ current_mood = مزاج العميل الحين (من آخر رسائله)
 
 Output format: JSON with keys "initial_mood" and "current_mood", values must be "positive", "neutral", or "negative"."""
 
-_configured = False
+_client: genai.Client | None = None
 
 
 @dataclass
@@ -47,12 +47,12 @@ class SentimentResult:
 _FALLBACK = SentimentResult(initial_mood="neutral", current_mood="neutral")
 
 
-def _ensure_configured() -> None:
-    global _configured
-    if not _configured:
+def _get_client() -> genai.Client:
+    global _client
+    if _client is None:
         settings = get_settings()
-        genai.configure(api_key=settings.gemini_api_key)
-        _configured = True
+        _client = genai.Client(api_key=settings.gemini_api_key)
+    return _client
 
 
 def _build_classifier_input(history: list[dict], current_text: str) -> str:
@@ -108,7 +108,7 @@ async def classify_sentiment(
     Fail-safe: returns neutral/neutral on any error — never blocks the pipeline.
     """
     try:
-        _ensure_configured()
+        client = _get_client()
         settings = get_settings()
 
         classifier_input = _build_classifier_input(history, current_text)
@@ -118,12 +118,13 @@ async def classify_sentiment(
             if m.get("direction") == "inbound" and m.get("content", "").strip()
         ]) + (1 if current_text.strip() else 0)
 
-        model = genai.GenerativeModel(
-            model_name=settings.gemini_model,
-            system_instruction=SENTIMENT_PROMPT,
-            generation_config=genai.GenerationConfig(
+        response = await client.aio.models.generate_content(
+            model=settings.gemini_model,
+            contents=classifier_input,
+            config=types.GenerateContentConfig(
+                system_instruction=SENTIMENT_PROMPT,
                 temperature=0.0,
-                max_output_tokens=30,
+                max_output_tokens=256,
                 response_mime_type="application/json",
                 response_schema={
                     "type": "object",
@@ -139,12 +140,12 @@ async def classify_sentiment(
                     },
                     "required": ["initial_mood", "current_mood"],
                 },
+                # MINIMAL keeps thinking headroom small so the 256-token
+                # budget leaves room for the JSON response.
+                thinking_config=types.ThinkingConfig(
+                    thinking_level=types.ThinkingLevel.MINIMAL,
+                ),
             ),
-        )
-
-        response = await asyncio.to_thread(
-            model.generate_content,
-            [{"role": "user", "parts": [classifier_input]}],
         )
 
         data = json.loads(response.text)
