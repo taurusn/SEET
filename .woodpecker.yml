@@ -203,10 +203,20 @@ steps:
       - cd /home/ubuntu/SEET
       # --no-build: the `build` step already built the images. We only
       # want to recreate containers with the already-built image here.
-      - docker compose -p seet up -d --no-build
-      # Backstop: `up -d` can stop a dependent (e.g. nginx) while
-      # recreating its deps without starting it back up. Re-apply for
-      # nginx + tunnel explicitly so the public path is always live.
+      #
+      # CRITICAL: list app services explicitly. Do NOT include
+      # woodpecker-agent, woodpecker-server, or infra (db/redis/
+      # rabbitmq/minio/tunnel) in this list.
+      #
+      # This step runs INSIDE the woodpecker-agent container. A bare
+      # `docker compose up -d` recreates the agent, which sends SIGTERM
+      # to the step we're executing from. Result: pipeline dies
+      # mid-deploy, containers end up in a half-upgraded state, nginx
+      # often ends up stopped-not-restarted, seet.cloud serves 502.
+      # This happened twice on 2026-04-22 before this fix landed.
+      - docker compose -p seet up -d --no-build api frontend admin-frontend message-worker reply-worker dlq-worker nginx
+      # Backstop: make sure nginx + tunnel are alive even if the
+      # previous command stopped one mid-dependency-recreation.
       - docker compose -p seet up -d nginx tunnel
       - docker compose -p seet ps
     depends_on: [migrate]
