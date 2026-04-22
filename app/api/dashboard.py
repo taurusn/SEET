@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select, func, exists as sa_exists
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,6 +24,8 @@ from app.models.schemas import (
     CompensationTier,
     Voucher,
     ShopCreate,
+    ShopLogin,
+    ShopPasswordChange,
     ShopUpdate,
     ShopResponse,
     ShopContextCreate,
@@ -57,8 +59,19 @@ from app.queue.rabbitmq import rabbitmq, OUTBOUND_QUEUE
 from app.api.auth import (
     get_current_shop,
     get_current_shop_id,
+    get_current_token_payload,
     create_access_token,
+    decode_token,
     TokenResponse,
+    TokenPayload,
+)
+from app.services.shop_auth import (
+    hash_password,
+    verify_password,
+    validate_password_strength,
+    LOGIN_IP_MAX_ATTEMPTS,
+    LOGIN_EMAIL_MAX_FAILURES,
+    LOGIN_WINDOW_SECONDS,
 )
 
 router = APIRouter(prefix="/api/v1", tags=["dashboard"])
@@ -66,41 +79,93 @@ router = APIRouter(prefix="/api/v1", tags=["dashboard"])
 
 # ─── Auth ─────────────────────────────────────────────────────────────────────
 
+_INVALID_CREDENTIALS_DETAIL = "Invalid email or password"
 
-@router.post("/shops", response_model=TokenResponse, status_code=201)
-async def register_shop(data: ShopCreate, db: AsyncSession = Depends(get_db)):
-    """Register a new shop and return a JWT for future requests."""
-    shop = Shop(
-        name=data.name,
-        ig_page_id=data.ig_page_id,
-        ig_access_token=encrypt_token(data.ig_access_token) if data.ig_access_token else None,
-        wa_phone_number_id=data.wa_phone_number_id,
-        wa_waba_id=data.wa_waba_id,
-        wa_access_token=encrypt_token(data.wa_access_token) if data.wa_access_token else None,
-    )
-    db.add(shop)
-    await db.flush()
 
-    return create_access_token(shop.id)
+def _client_ip(request: Request) -> str:
+    """Best-effort client IP extraction behind our nginx/tunnel setup."""
+    fwd = request.headers.get("x-forwarded-for", "")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
 
 
 @router.post("/auth/login", response_model=TokenResponse)
-async def login_by_name(
-    data: dict,
+async def login(
+    data: ShopLogin,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    """Login by shop name and return a JWT."""
-    name = data.get("name", "").strip()
-    if not name:
-        raise HTTPException(status_code=400, detail="Shop name is required")
-    stmt = select(Shop).where(func.lower(Shop.name) == name.lower())
+    """Email + password login.
+
+    Enforces per-IP rate limiting and per-email lockout to blunt
+    brute-force attempts. Returns a generic error on every failure path
+    so an attacker can't discriminate "no such email" from "wrong password"
+    from "shop deactivated."
+    """
+    email = data.email.strip().lower()
+    password = data.password.strip()
+
+    # Per-IP cap — cheap global guard that doesn't care about the email
+    ip = _client_ip(request)
+    ip_attempts = await redis_client.incr_login_attempt_ip(
+        ip, LOGIN_WINDOW_SECONDS
+    )
+    if ip_attempts > LOGIN_IP_MAX_ATTEMPTS:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many login attempts. Try again in 15 minutes.",
+        )
+
+    # Per-email lockout — read current count without incrementing.
+    # The counter only advances on actual failed-credentials below.
+    if await redis_client.get_login_failures_email(email) >= LOGIN_EMAIL_MAX_FAILURES:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Account temporarily locked. Try again in 15 minutes.",
+        )
+
+    stmt = select(Shop).where(Shop.email == email)
     result = await db.execute(stmt)
     shop = result.scalar_one_or_none()
-    if not shop:
-        raise HTTPException(status_code=404, detail="Shop not found")
+
+    if not shop or not shop.password_hash:
+        await redis_client.incr_login_failure_email(email, LOGIN_WINDOW_SECONDS)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=_INVALID_CREDENTIALS_DETAIL,
+        )
+    if not verify_password(password, shop.password_hash):
+        await redis_client.incr_login_failure_email(email, LOGIN_WINDOW_SECONDS)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=_INVALID_CREDENTIALS_DETAIL,
+        )
     if not shop.is_active:
-        raise HTTPException(status_code=403, detail="Shop is deactivated")
-    return create_access_token(shop.id)
+        # Note: revealing "inactive" after a correct password is fine —
+        # the attacker already has valid creds at this point.
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Shop is deactivated — contact support.",
+        )
+
+    await redis_client.clear_login_failures_email(email)
+    return create_access_token(
+        shop.id, must_change_password=bool(shop.must_change_password)
+    )
+
+
+@router.post("/auth/logout", status_code=204)
+async def logout(
+    payload: TokenPayload = Depends(get_current_token_payload),
+) -> Response:
+    """Revoke the current JWT by blacklisting its jti until natural expiry."""
+    if payload.jti:
+        ttl = int(
+            (payload.exp - datetime.now(timezone.utc)).total_seconds()
+        )
+        await redis_client.blacklist_token(payload.jti, ttl)
+    return Response(status_code=204)
 
 
 @router.post("/auth/token", response_model=TokenResponse)
@@ -108,7 +173,57 @@ async def refresh_shop_token(
     shop: Shop = Depends(get_current_shop),
 ):
     """Issue a new JWT for an authenticated shop."""
-    return create_access_token(shop.id)
+    return create_access_token(
+        shop.id, must_change_password=bool(shop.must_change_password)
+    )
+
+
+@router.post("/shop/password", status_code=204)
+async def change_password(
+    data: ShopPasswordChange,
+    request: Request,
+    payload: TokenPayload = Depends(get_current_token_payload),
+    shop: Shop = Depends(get_current_shop),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Change the authenticated shop's password.
+
+    - Normal flow: current_password required and verified.
+    - Forced-change flow: if must_change_password is set, we trust the
+      already-authenticated token and skip current_password (the shop
+      owner is logging in with an admin-issued temp credential they
+      need to rotate immediately).
+
+    On success: clears must_change_password, revokes the current token,
+    and the frontend re-logs in to pick up a fresh token.
+    """
+    new_password = data.new_password.strip()
+    pw_error = validate_password_strength(new_password)
+    if pw_error:
+        raise HTTPException(status_code=400, detail=pw_error)
+
+    if not shop.must_change_password:
+        current = (data.current_password or "").strip()
+        if not current:
+            raise HTTPException(
+                status_code=400, detail="Current password is required"
+            )
+        if not shop.password_hash or not verify_password(current, shop.password_hash):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Current password is incorrect",
+            )
+
+    shop.password_hash = hash_password(new_password)
+    shop.must_change_password = False
+    await db.flush()
+
+    # Revoke the token that made this request — next action must re-auth
+    if payload.jti:
+        ttl = int((payload.exp - datetime.now(timezone.utc)).total_seconds())
+        await redis_client.blacklist_token(payload.jti, ttl)
+
+    return Response(status_code=204)
 
 
 # ─── Shop (own profile) ──────────────────────────────────────────────────────
@@ -287,6 +402,36 @@ async def owner_reply(
             status_code=400,
             detail="Cannot send replies to playground conversations",
         )
+
+    # WhatsApp only permits free-form text within 24h of the last inbound
+    # customer message. Outside that window, Meta rejects the send (requires
+    # an approved template). Catch here so owners see a clear error instead
+    # of a silent DLQ'd message.
+    if convo.platform == "whatsapp":
+        last_inbound_result = await db.execute(
+            select(func.max(Message.created_at)).where(
+                Message.conversation_id == convo.id,
+                Message.direction == "inbound",
+            )
+        )
+        last_inbound_at = last_inbound_result.scalar_one_or_none()
+        if not last_inbound_at:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot send — no prior customer message on this conversation",
+            )
+        if last_inbound_at.tzinfo is None:
+            last_inbound_at = last_inbound_at.replace(tzinfo=timezone.utc)
+        gap = datetime.now(timezone.utc) - last_inbound_at
+        if gap.total_seconds() > 24 * 3600:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "WhatsApp 24-hour customer service window has closed. "
+                    "Free-form replies are no longer allowed on this conversation; "
+                    "send an approved template instead."
+                ),
+            )
 
     outbound_msg = await save_message(
         db, convo.id, "outbound", data.message, "human"

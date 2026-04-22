@@ -42,17 +42,45 @@ async def send_ig_message(access_token: str, recipient_id: str, text: str) -> di
 
 
 def extract_ig_messages(payload: dict) -> list[dict]:
-    """Extract individual messages from an Instagram webhook payload."""
+    """Extract individual messages from an Instagram webhook payload.
+
+    Skips echoes (is_echo=True) — Meta re-delivers our own outbound DMs as
+    webhook events, and processing them would make the AI reply to itself.
+
+    Handles:
+      - plain text messages
+      - quick_reply postbacks (treated as the user's payload text)
+      - attachments (images, stickers, etc.) — surfaced as a synthetic
+        placeholder so the AI can reply naturally instead of silently dropping
+    """
     messages = []
     for entry in payload.get("entry", []):
         for messaging in entry.get("messaging", []):
             message = messaging.get("message", {})
-            if message and "text" in message:
-                messages.append({
-                    "sender_id": messaging["sender"]["id"],
-                    "recipient_id": messaging["recipient"]["id"],
-                    "text": message["text"],
-                    "meta_message_id": message.get("mid", ""),
-                    "page_id": entry.get("id", ""),
-                })
+            if not message or message.get("is_echo"):
+                continue
+
+            text: str | None = None
+            if "quick_reply" in message:
+                text = (
+                    message["quick_reply"].get("payload")
+                    or message.get("text")
+                )
+            elif "text" in message:
+                text = message["text"]
+            elif message.get("attachments"):
+                atts = message["attachments"] or []
+                kind = atts[0].get("type", "attachment") if atts else "attachment"
+                text = f"[رسالة غير نصية: {kind}]"
+
+            if not text:
+                continue
+
+            messages.append({
+                "sender_id": messaging["sender"]["id"],
+                "recipient_id": messaging["recipient"]["id"],
+                "text": text,
+                "meta_message_id": message.get("mid", ""),
+                "page_id": entry.get("id", ""),
+            })
     return messages

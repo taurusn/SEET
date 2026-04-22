@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import Image from "next/image";
@@ -251,17 +250,27 @@ export default function LoginPage() {
     setError("");
 
     const form = new FormData(e.currentTarget);
-    const shopId = form.get("shop_id") as string;
+    const email = (form.get("email") as string).trim();
+    const password = form.get("password") as string;
 
     try {
       const res = await api.post<{
         access_token: string;
         shop_id: string;
-      }>("/api/v1/auth/login", { name: shopId });
-      await login(res.shop_id, res.access_token);
-      router.replace("/");
-    } catch {
-      setError("اسم المحل غير موجود");
+        must_change_password: boolean;
+      }>("/api/v1/auth/login", { email, password });
+
+      const shop = await login(res.access_token);
+      router.replace(shop.must_change_password ? "/change-password" : "/");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "";
+      if (msg.includes("locked") || msg.includes("Too many")) {
+        setError("الحساب مقفل مؤقتًا، حاول بعد ١٥ دقيقة");
+      } else if (msg.includes("deactivated")) {
+        setError("الحساب موقوف — تواصل مع الإدارة");
+      } else {
+        setError("البريد أو كلمة المرور غير صحيحة");
+      }
     } finally {
       setLoading(false);
     }
@@ -354,20 +363,35 @@ export default function LoginPage() {
           <form onSubmit={handleSubmit} className="space-y-5">
             <div>
               <label className="block text-sm font-medium mb-2 text-foreground">
-                اسم المحل
+                البريد الإلكتروني
               </label>
               <input
-                name="shop_id"
-                type="text"
+                name="email"
+                type="email"
+                autoComplete="email"
                 required
-                placeholder="أدخل اسم المحل"
+                placeholder="you@example.com"
+                dir="ltr"
                 className="w-full px-4 py-3 rounded-xl border border-border bg-background text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-colors"
               />
             </div>
 
-            {error && (
-              <p className="text-sm text-danger">{error}</p>
-            )}
+            <div>
+              <label className="block text-sm font-medium mb-2 text-foreground">
+                كلمة المرور
+              </label>
+              <input
+                name="password"
+                type="password"
+                autoComplete="current-password"
+                required
+                placeholder="••••••••"
+                dir="ltr"
+                className="w-full px-4 py-3 rounded-xl border border-border bg-background text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-colors"
+              />
+            </div>
+
+            {error && <p className="text-sm text-danger">{error}</p>}
 
             <button
               type="submit"
@@ -378,11 +402,8 @@ export default function LoginPage() {
             </button>
           </form>
 
-          <p className="mt-6 text-center text-sm text-muted-foreground">
-            ما عندك حساب؟{" "}
-            <Link href="/register" className="text-primary hover:underline font-semibold">
-              سجل الآن
-            </Link>
+          <p className="mt-6 text-center text-xs text-muted-foreground">
+            تسجيل حسابات جديدة يتم عبر فريق SEET. للاستفسار تواصل معنا.
           </p>
         </div>
       </div>

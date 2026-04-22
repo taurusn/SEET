@@ -413,6 +413,16 @@ async def process_message(msg: dict) -> None:
                     hour=datetime.now(timezone.utc).hour,
                 )
 
+                # AI degradation signal: if Gemini's circuit breaker is open
+                # the pipeline just served a canned fallback. Notify the shop
+                # owner so they can take over rather than letting generic
+                # replies go out silently.
+                if await redis_client.is_circuit_open("gemini"):
+                    await redis_client.publish_event(str(shop.id), {
+                        "type": "ai_degraded",
+                        "service": "gemini",
+                    })
+
                 if result.handoff_needed:
                     reason = result.handoff_reason or f"رسالة العميل: {text}"
                     await trigger_handoff(db, str(convo.id), reason=reason)

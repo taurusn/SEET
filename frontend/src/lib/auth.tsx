@@ -12,6 +12,8 @@ import { api } from "./api";
 interface Shop {
   id: string;
   name: string;
+  email?: string | null;
+  must_change_password: boolean;
   ig_page_id?: string;
   wa_phone_number_id?: string;
   wa_waba_id?: string;
@@ -29,16 +31,9 @@ interface AuthState {
 }
 
 interface AuthContextType extends AuthState {
-  login: (shopId: string, token: string) => Promise<void>;
-  register: (data: {
-    name: string;
-    ig_page_id?: string;
-    ig_access_token?: string;
-    wa_phone_number_id?: string;
-    wa_waba_id?: string;
-    wa_access_token?: string;
-  }) => Promise<void>;
-  logout: () => void;
+  login: (token: string) => Promise<Shop>;
+  logout: () => Promise<void>;
+  refreshShop: () => Promise<Shop | null>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -52,69 +47,82 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const token = localStorage.getItem("token");
-    const shopStr = localStorage.getItem("shop");
 
-    if (token && shopStr) {
-      try {
-        JSON.parse(shopStr); // validate JSON
-        // Validate token by fetching fresh shop data
-        api
-          .get<Shop>("/api/v1/shop")
-          .then((freshShop) => {
-            localStorage.setItem("shop", JSON.stringify(freshShop));
-            setState({ token, shop: freshShop, loading: false });
-          })
-          .catch(() => {
-            localStorage.removeItem("token");
-            localStorage.removeItem("shop");
-            setState({ token: null, shop: null, loading: false });
-          });
-      } catch {
+    if (!token) {
+      setState({ token: null, shop: null, loading: false });
+      return;
+    }
+
+    // Always revalidate the token against /shop on boot. Stored shop
+    // blobs can go stale (must_change_password flip, deactivation, etc).
+    api
+      .get<Shop>("/api/v1/shop")
+      .then((shop) => {
+        localStorage.setItem("shop", JSON.stringify(shop));
+        setState({ token, shop, loading: false });
+      })
+      .catch(() => {
         localStorage.removeItem("token");
         localStorage.removeItem("shop");
         setState({ token: null, shop: null, loading: false });
-      }
-    } else {
-      setState({ token: null, shop: null, loading: false });
-    }
+      });
   }, []);
 
-  const login = async (shopId: string, token: string) => {
+  // Listen for mid-session 401s emitted by api.ts and clear auth state
+  // so the dashboard layout redirects to /login.
+  useEffect(() => {
+    function onUnauthorized() {
+      localStorage.removeItem("token");
+      localStorage.removeItem("shop");
+      localStorage.removeItem("seet_theme");
+      setState({ token: null, shop: null, loading: false });
+    }
+    window.addEventListener("auth:unauthorized", onUnauthorized);
+    return () => window.removeEventListener("auth:unauthorized", onUnauthorized);
+  }, []);
+
+  const login = async (token: string): Promise<Shop> => {
     localStorage.setItem("token", token);
     try {
       const shop = await api.get<Shop>("/api/v1/shop");
       localStorage.setItem("shop", JSON.stringify(shop));
       setState({ token, shop, loading: false });
-    } catch {
+      return shop;
+    } catch (e) {
       localStorage.removeItem("token");
-      throw new Error("Login succeeded but failed to fetch shop profile");
+      localStorage.removeItem("shop");
+      throw e;
     }
   };
 
-  const register = async (data: {
-    name: string;
-    ig_page_id?: string;
-    ig_access_token?: string;
-    wa_phone_number_id?: string;
-    wa_waba_id?: string;
-    wa_access_token?: string;
-  }) => {
-    const res = await api.post<{
-      access_token: string;
-      shop_id: string;
-    }>("/api/v1/shops", data);
-    await login(res.shop_id, res.access_token);
+  const refreshShop = async (): Promise<Shop | null> => {
+    if (!state.token) return null;
+    try {
+      const shop = await api.get<Shop>("/api/v1/shop");
+      localStorage.setItem("shop", JSON.stringify(shop));
+      setState((s) => ({ ...s, shop }));
+      return shop;
+    } catch {
+      return null;
+    }
   };
 
-  const logout = () => {
+  const logout = async () => {
+    // Best-effort server-side revocation — don't block UX on it.
+    try {
+      await api.post("/api/v1/auth/logout");
+    } catch {
+      // Token may already be invalid; clearing locally is what matters.
+    }
     localStorage.removeItem("token");
     localStorage.removeItem("shop");
+    localStorage.removeItem("seet_theme");
     setState({ token: null, shop: null, loading: false });
     window.location.href = "/login";
   };
 
   return (
-    <AuthContext.Provider value={{ ...state, login, register, logout }}>
+    <AuthContext.Provider value={{ ...state, login, logout, refreshShop }}>
       {children}
     </AuthContext.Provider>
   );

@@ -36,23 +36,60 @@ async def get_shop(db: AsyncSession, shop_id: str) -> Shop | None:
 
 
 async def update_message_status(
-    db: AsyncSession, message_id: str, status: str
+    db: AsyncSession,
+    message_id: str,
+    status: str,
+    meta_message_id: str | None = None,
 ) -> None:
-    """Update the status of an outbound message by its unique ID."""
+    """Update the status of an outbound message by its unique ID.
+
+    If meta_message_id is provided, also persist the Meta-issued id so we
+    can correlate later events (delivery receipts, reactions, reply-to).
+    """
     stmt = select(Message).where(Message.id == message_id)
     result = await db.execute(stmt)
     msg = result.scalar_one_or_none()
     if msg:
         msg.status = status
+        if meta_message_id:
+            msg.meta_message_id = meta_message_id
 
 
-async def refresh_token(db: AsyncSession, shop: Shop) -> None:
-    """Placeholder for Meta token refresh flow.
+async def deactivate_for_token_expiry(
+    db: AsyncSession, shop: Shop, platform: str
+) -> None:
+    """Deactivate a shop whose Meta token has expired.
 
-    In production, this would call the Meta OAuth endpoint
-    to exchange a long-lived token or refresh an expiring one.
+    Takes the shop out of rotation so the message_worker stops spinning up
+    AI replies we can't deliver, invalidates cached context, and publishes
+    an SSE event so the shop owner's dashboard can surface a re-auth banner.
     """
-    logger.warning("Token refresh needed for shop %s — not yet implemented", shop.id)
+    if shop.is_active:
+        shop.is_active = False
+        await db.commit()
+        logger.warning(
+            "Shop %s deactivated — %s token expired; re-auth required",
+            shop.id, platform,
+        )
+    else:
+        logger.info(
+            "Shop %s already inactive; skipping deactivation for expired %s token",
+            shop.id, platform,
+        )
+
+    try:
+        await redis_client.invalidate_shop_context(str(shop.id))
+    except Exception as e:
+        logger.warning("Failed to invalidate shop context cache: %s", e)
+
+    try:
+        await redis_client.publish_event(str(shop.id), {
+            "type": "shop_deactivated",
+            "reason": "token_expired",
+            "platform": platform,
+        })
+    except Exception as e:
+        logger.warning("Failed to publish shop_deactivated SSE event: %s", e)
 
 
 async def send_reply(msg: dict) -> None:
@@ -88,26 +125,40 @@ async def send_reply(msg: dict) -> None:
 
         for attempt in range(MAX_RETRIES):
             try:
+                meta_msg_id: str | None = None
                 if platform == "instagram":
-                    await send_ig_message(token, customer_id, reply)
+                    resp = await send_ig_message(token, customer_id, reply)
+                    meta_msg_id = resp.get("message_id") or None
                 elif platform == "whatsapp":
-                    await send_wa_message(
+                    resp = await send_wa_message(
                         token, shop.wa_phone_number_id, customer_id, reply
                     )
+                    messages_list = resp.get("messages") or []
+                    if messages_list:
+                        meta_msg_id = messages_list[0].get("id") or None
 
                 if message_id:
-                    await update_message_status(db, message_id, "sent")
+                    await update_message_status(
+                        db, message_id, "sent", meta_message_id=meta_msg_id
+                    )
                     await db.commit()
                 logger.info(
-                    "Reply sent: platform=%s customer=%s attempt=%d",
-                    platform, customer_id, attempt + 1,
+                    "Reply sent: platform=%s customer=%s attempt=%d meta_id=%s",
+                    platform, customer_id, attempt + 1, meta_msg_id or "?",
                 )
                 return
 
             except TokenExpiredError:
-                logger.warning("Token expired for shop %s, attempting refresh", shop.id)
-                await refresh_token(db, shop)
-                await db.commit()
+                # No point retrying — token won't un-expire. Break out
+                # immediately, deactivate the shop, and DLQ the message
+                # with a specific reason so ops / the admin dashboard
+                # can distinguish re-auth from transient failures.
+                await deactivate_for_token_expiry(db, shop, platform)
+                if message_id:
+                    await update_message_status(db, message_id, "failed")
+                    await db.commit()
+                await rabbitmq.move_to_dead_letter(msg, reason="token_expired")
+                return
 
             except RateLimitError:
                 wait = 2 ** attempt

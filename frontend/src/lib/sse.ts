@@ -43,6 +43,8 @@ export function useSSE(onEvent: EventHandler) {
       "new_message",
       "handoff_triggered",
       "conversation_updated",
+      "shop_deactivated",
+      "ai_degraded",
     ];
 
     for (const type of eventTypes) {

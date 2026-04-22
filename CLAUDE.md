@@ -2,6 +2,15 @@
 
 A B2B platform that onboards coffee shops / small businesses and auto-replies to their Instagram DMs and WhatsApp messages using Gemini AI, with human handoff, digital vouchers, and white-label branding.
 
+## Agent Team
+
+When asked to spin up the product crew, read the team blueprint at:
+`.claude/teams/product-crew/`
+
+Follow `config.yml` for team shape and `coordination.md` for protocols.
+Spawn teammates using their respective `.md` files as context.
+Dashboard: `cd .claude/teams/product-crew/dashboard && ./start.sh`
+
 ## Quick Start (New Server)
 
 ```bash
@@ -25,11 +34,14 @@ curl -X POST http://localhost/api/v1/admin/seed \
   -H "Content-Type: application/json" \
   -d '{"email":"admin@seet.sa","password":"seet@2026","name":"Admin"}'
 
-# 6. Get the public tunnel URL
-docker compose -p seet logs tunnel 2>&1 | grep "trycloudflare.com"
+# 6. Confirm the tunnel is up
+docker compose -p seet logs tunnel --tail 20
 ```
 
-The public URL is `https://<random>.trycloudflare.com`. It changes on every tunnel restart.
+Production runs behind a **Cloudflare named tunnel** at `https://seet.cloud`,
+wired via `CLOUDFLARE_TUNNEL_TOKEN` in `.env` (see `docker-compose.yml`
+service `tunnel`). The hostname is stable across restarts, so Meta webhook
+subscriptions don't need re-pointing.
 
 ## Architecture
 
@@ -257,7 +269,7 @@ $COMPOSE up --build -d api admin-frontend frontend
 
 # View logs
 $COMPOSE logs -f api
-$COMPOSE logs tunnel 2>&1 | grep trycloudflare  # get public URL
+$COMPOSE logs tunnel --tail 20  # check named tunnel status (seet.cloud)
 
 # Run migrations
 $COMPOSE exec api alembic upgrade head
@@ -303,7 +315,7 @@ Woodpecker needs a GitHub OAuth app for authentication. The agent mounts the Doc
 
 3. **401 handling in frontends**: The `api.ts` clients must NOT do `window.location.href` redirects on 401. They just `throw new Error("Unauthorized")`. The auth context `.catch()` handles cleanup, and the dashboard layout handles redirect to login. Doing a hard redirect in api.ts causes loops because it fires before the auth context can clear localStorage.
 
-4. **Tunnel URL is ephemeral**: Cloudflare Quick Tunnel generates a random URL on every container restart. Check `docker compose -p seet logs tunnel` for the current one. Meta webhook URLs need updating when it changes.
+4. **Tunnel is a Cloudflare named tunnel at seet.cloud**: runs via `CLOUDFLARE_TUNNEL_TOKEN`, stable across restarts. Meta webhook subscriptions should always point at `https://seet.cloud/webhook/instagram` and `https://seet.cloud/webhook/whatsapp`.
 
 5. **Password handling**: Admin passwords are `.strip()`-ed before bcrypt hash/compare. This prevents login failures from trailing whitespace (common on mobile).
 

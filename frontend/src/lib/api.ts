@@ -28,6 +28,13 @@ class ApiClient {
     });
 
     if (res.status === 401) {
+      // Broadcast so AuthProvider can clear state — don't redirect from
+      // here (that causes loops with the auth context). Exception: the
+      // logout endpoint itself returns 401 if the token was already
+      // revoked; no need to fire the event in that case.
+      if (typeof window !== "undefined" && !path.endsWith("/auth/logout")) {
+        window.dispatchEvent(new CustomEvent("auth:unauthorized"));
+      }
       throw new Error("Unauthorized");
     }
 

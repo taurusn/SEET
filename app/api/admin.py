@@ -11,6 +11,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select, func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.database import get_db
@@ -32,6 +33,7 @@ from app.models.schemas import (
     AdminShopCreate,
     AdminShopResponse,
     ShopResponse,
+    ShopSetCredentialsRequest,
     ShopUpdate,
     ShopContextCreate,
     ShopContextResponse,
@@ -43,10 +45,17 @@ from app.api.admin_auth import (
     get_current_admin,
     require_role,
 )
-from app.services.encryption import encrypt_token
+from app.services.encryption import encrypt_token, decrypt_token
 from app.services.redis_client import redis_client
 from app.services.storage import upload_logo, delete_logo
 from app.services.export import messages_to_csv, analytics_to_csv
+from app.services.meta_verify import verify_ig_credentials, verify_wa_credentials
+from app.services.shop_auth import (
+    hash_password,
+    is_valid_email,
+    validate_password_strength,
+    generate_temp_password,
+)
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 
@@ -234,7 +243,12 @@ async def create_shop(
     admin: Admin = Depends(require_role("admin", "superadmin")),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create a new shop (onboarding)."""
+    """Create a new shop (onboarding).
+
+    Shops start inactive — they must pass Meta credential verification
+    and be explicitly accepted before receiving webhook traffic. See
+    POST /admin/shops/{id}/verify and POST /admin/shops/{id}/accept.
+    """
     shop = Shop(
         name=data.name,
         ig_page_id=data.ig_page_id,
@@ -245,10 +259,164 @@ async def create_shop(
         logo_url=data.logo_url,
         brand_color=data.brand_color,
         splash_text=data.splash_text,
+        is_active=False,
     )
     db.add(shop)
     await db.flush()
     return shop
+
+
+@router.post("/shops/{shop_id}/verify")
+async def verify_shop(
+    shop_id: uuid.UUID,
+    admin: Admin = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Run Meta credential verification against the shop's stored tokens.
+
+    Returns a per-platform result with the list of checks. Read-only —
+    does not activate the shop. Callers should follow up with /accept
+    once all configured platforms pass.
+    """
+    stmt = select(Shop).where(Shop.id == shop_id)
+    result = await db.execute(stmt)
+    shop = result.scalar_one_or_none()
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
+    results: list[dict] = []
+    any_checked = False
+
+    if shop.ig_page_id or shop.ig_access_token:
+        any_checked = True
+        try:
+            token = decrypt_token(shop.ig_access_token) if shop.ig_access_token else ""
+        except Exception as e:
+            results.append({
+                "platform": "instagram",
+                "ok": False,
+                "checks": [{"name": "token_decrypt", "ok": False, "detail": str(e)}],
+            })
+        else:
+            results.append(
+                (await verify_ig_credentials(token, shop.ig_page_id or "")).to_dict()
+            )
+
+    if shop.wa_phone_number_id or shop.wa_access_token:
+        any_checked = True
+        try:
+            token = decrypt_token(shop.wa_access_token) if shop.wa_access_token else ""
+        except Exception as e:
+            results.append({
+                "platform": "whatsapp",
+                "ok": False,
+                "checks": [{"name": "token_decrypt", "ok": False, "detail": str(e)}],
+            })
+        else:
+            results.append(
+                (await verify_wa_credentials(token, shop.wa_phone_number_id or "")).to_dict()
+            )
+
+    if not any_checked:
+        raise HTTPException(
+            status_code=400,
+            detail="Shop has no IG or WhatsApp credentials to verify",
+        )
+
+    all_ok = all(r["ok"] for r in results)
+    return {"shop_id": str(shop.id), "ok": all_ok, "results": results}
+
+
+@router.post("/shops/{shop_id}/accept")
+async def accept_shop(
+    shop_id: uuid.UUID,
+    admin: Admin = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Activate a shop after successful verification.
+
+    Re-runs verification server-side — we never trust a client-side
+    "verified" claim. All configured platforms must pass before is_active
+    flips to True.
+    """
+    stmt = select(Shop).where(Shop.id == shop_id)
+    result = await db.execute(stmt)
+    shop = result.scalar_one_or_none()
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
+    if shop.is_active:
+        return {"shop_id": str(shop.id), "is_active": True, "already_active": True}
+
+    verify_resp = await verify_shop(shop_id=shop_id, admin=admin, db=db)
+    if not verify_resp["ok"]:
+        raise HTTPException(
+            status_code=400,
+            detail={"message": "Verification failed — cannot accept", "results": verify_resp["results"]},
+        )
+
+    shop.is_active = True
+    await db.flush()
+    await redis_client.invalidate_shop_context(str(shop.id))
+    return {"shop_id": str(shop.id), "is_active": True, "results": verify_resp["results"]}
+
+
+@router.post("/shops/{shop_id}/credentials")
+async def set_shop_credentials(
+    shop_id: uuid.UUID,
+    data: ShopSetCredentialsRequest,
+    admin: Admin = Depends(require_role("admin", "superadmin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Assign or reset an email + password for a shop.
+
+    Used to migrate pre-auth shops and to issue a reset when an owner
+    loses their password (until a self-service reset flow exists).
+    The shop owner must rotate this password on first login —
+    must_change_password is set to True.
+
+    If password is omitted, a random 12-char password is generated and
+    returned in the response. Admin is responsible for delivering it
+    out-of-band.
+    """
+    email = data.email.strip().lower()
+    if not is_valid_email(email):
+        raise HTTPException(status_code=400, detail="Invalid email address")
+
+    temp_password = (data.password or "").strip() or generate_temp_password()
+    pw_error = validate_password_strength(temp_password)
+    if pw_error:
+        raise HTTPException(status_code=400, detail=pw_error)
+
+    stmt = select(Shop).where(Shop.id == shop_id)
+    result = await db.execute(stmt)
+    shop = result.scalar_one_or_none()
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
+    # Make sure email isn't taken by a different shop
+    conflict = await db.execute(
+        select(Shop).where(Shop.email == email, Shop.id != shop_id)
+    )
+    if conflict.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="Email is already in use")
+
+    shop.email = email
+    shop.password_hash = hash_password(temp_password)
+    shop.must_change_password = True
+
+    try:
+        await db.flush()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Email is already in use")
+
+    return {
+        "shop_id": str(shop.id),
+        "email": email,
+        "temporary_password": temp_password,
+        "must_change_password": True,
+    }
 
 
 @router.get("/shops/{shop_id}", response_model=AdminShopResponse)
@@ -325,15 +493,27 @@ async def toggle_shop(
     admin: Admin = Depends(require_role("admin", "superadmin")),
     db: AsyncSession = Depends(get_db),
 ):
-    """Activate or deactivate a shop."""
+    """Deactivate a shop.
+
+    Activation MUST go through POST /shops/{shop_id}/accept so Meta
+    credentials are re-verified server-side. This endpoint refuses to
+    flip an inactive shop back on — doing so would bypass verification.
+    """
     stmt = select(Shop).where(Shop.id == shop_id)
     result = await db.execute(stmt)
     shop = result.scalar_one_or_none()
     if not shop:
         raise HTTPException(status_code=404, detail="Shop not found")
 
-    shop.is_active = not shop.is_active
+    if not shop.is_active:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot activate via /toggle — use /accept so credentials are re-verified.",
+        )
+
+    shop.is_active = False
     await db.flush()
+    await redis_client.invalidate_shop_context(str(shop.id))
     return {"id": str(shop.id), "is_active": shop.is_active}
 
 
@@ -473,6 +653,39 @@ async def get_platform_stats(
         "total_messages": total_messages.scalar() or 0,
         "active_handoffs": active_handoffs.scalar() or 0,
         "total_vouchers": total_vouchers.scalar() or 0,
+    }
+
+
+@router.get("/dlq")
+async def get_dlq_stats(
+    admin: Admin = Depends(get_current_admin),
+    limit: int = Query(50, ge=1, le=100),
+):
+    """Dead-letter queue visibility for ops.
+
+    Returns total lifetime count, per-reason breakdown, and the most
+    recent N entries (newest first). Each entry is pipe-delimited:
+    timestamp|reason|shop_id|customer_id.
+    """
+    total_raw = await redis_client.client.get("dlq:total_count")
+    reason_counts_raw = await redis_client.client.hgetall("dlq:reason")
+    recent = await redis_client.client.lrange("dlq:recent", 0, limit - 1)
+
+    def _parse(entry: str) -> dict:
+        parts = entry.split("|", 3)
+        while len(parts) < 4:
+            parts.append("")
+        return {
+            "timestamp": parts[0],
+            "reason": parts[1],
+            "shop_id": parts[2],
+            "customer_id": parts[3],
+        }
+
+    return {
+        "total": int(total_raw or 0),
+        "by_reason": {k: int(v) for k, v in (reason_counts_raw or {}).items()},
+        "recent": [_parse(e) for e in recent],
     }
 
 

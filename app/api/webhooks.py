@@ -57,8 +57,14 @@ async def ig_webhook(request: Request):
         logger.warning("Invalid Instagram webhook signature")
         raise HTTPException(status_code=403, detail="Invalid signature")
 
-    # Parse from already-read bytes to avoid double read
-    body = json.loads(body_bytes)
+    # Parse from already-read bytes to avoid double read.
+    # Never 5xx on malformed payloads — Meta disables webhooks after
+    # sustained server errors. Log and ACK.
+    try:
+        body = json.loads(body_bytes)
+    except json.JSONDecodeError as e:
+        logger.warning("Instagram webhook: invalid JSON body (%s)", e)
+        return Response(status_code=200)
 
     # Publish to queue immediately for fast ACK
     await rabbitmq.publish(INBOUND_QUEUE, {
@@ -97,7 +103,11 @@ async def wa_webhook(request: Request):
         logger.warning("Invalid WhatsApp webhook signature")
         raise HTTPException(status_code=403, detail="Invalid signature")
 
-    body = json.loads(body_bytes)
+    try:
+        body = json.loads(body_bytes)
+    except json.JSONDecodeError as e:
+        logger.warning("WhatsApp webhook: invalid JSON body (%s)", e)
+        return Response(status_code=200)
 
     await rabbitmq.publish(INBOUND_QUEUE, {
         "platform": "whatsapp",

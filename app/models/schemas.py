@@ -32,6 +32,9 @@ class Shop(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String(255), nullable=False)
+    email = Column(String(255), unique=True, nullable=True)
+    password_hash = Column(Text, nullable=True)
+    must_change_password = Column(Boolean, default=False, nullable=False)
     ig_page_id = Column(String(100), nullable=True)
     ig_access_token = Column(Text, nullable=True)  # stored encrypted
     wa_phone_number_id = Column(String(100), nullable=True)
@@ -234,12 +237,37 @@ class MessageStatusEnum(str, Enum):
 
 
 class ShopCreate(BaseModel):
+    """Admin-portal shop creation. Public registration uses ShopRegister."""
     name: str
     ig_page_id: Optional[str] = None
     ig_access_token: Optional[str] = None
     wa_phone_number_id: Optional[str] = None
     wa_waba_id: Optional[str] = None
     wa_access_token: Optional[str] = None
+
+
+class ShopRegister(BaseModel):
+    """Self-service shop registration with email + password."""
+    name: str = Field(..., min_length=1, max_length=255)
+    email: str = Field(..., min_length=3, max_length=255)
+    password: str = Field(..., min_length=8, max_length=128)
+    confirm_password: str = Field(..., min_length=8, max_length=128)
+
+
+class ShopLogin(BaseModel):
+    email: str = Field(..., min_length=3, max_length=255)
+    password: str = Field(..., min_length=1, max_length=128)
+
+
+class ShopPasswordChange(BaseModel):
+    current_password: Optional[str] = Field(None, min_length=1, max_length=128)
+    new_password: str = Field(..., min_length=8, max_length=128)
+
+
+class ShopSetCredentialsRequest(BaseModel):
+    """Admin-issued credentials for an existing shop."""
+    email: str = Field(..., min_length=3, max_length=255)
+    password: Optional[str] = Field(None, min_length=8, max_length=128)
 
 
 class ShopUpdate(BaseModel):
@@ -258,6 +286,8 @@ class ShopUpdate(BaseModel):
 class ShopResponse(BaseModel):
     id: uuid.UUID
     name: str
+    email: Optional[str] = None
+    must_change_password: bool = False
     ig_page_id: Optional[str] = None
     wa_phone_number_id: Optional[str] = None
     wa_waba_id: Optional[str] = None

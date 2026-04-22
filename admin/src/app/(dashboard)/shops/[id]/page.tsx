@@ -14,6 +14,13 @@ import {
   CheckCircle,
   Clock,
   Download,
+  ShieldCheck,
+  Check,
+  X,
+  Loader2,
+  KeyRound,
+  Copy,
+  AlertTriangle,
 } from "lucide-react";
 
 interface ShopDetail {
@@ -78,6 +85,22 @@ interface VisitItem {
   ended_at?: string | null;
 }
 
+interface VerifyCheck {
+  name: string;
+  ok: boolean;
+  detail?: string;
+}
+interface VerifyPlatformResult {
+  platform: string;
+  ok: boolean;
+  checks: VerifyCheck[];
+}
+interface VerifyResponse {
+  shop_id: string;
+  ok: boolean;
+  results: VerifyPlatformResult[];
+}
+
 const periods = [
   { value: "today", label: "Today" },
   { value: "7d", label: "7 Days" },
@@ -113,6 +136,20 @@ export default function ShopDetailPage() {
   const [messages, setMessages] = useState<MessageItem[]>([]);
   const [messagesLoading, setMessagesLoading] = useState(false);
   const [visits, setVisits] = useState<VisitItem[]>([]);
+
+  const [verifying, setVerifying] = useState(false);
+  const [verifyResult, setVerifyResult] = useState<VerifyResponse | null>(null);
+  const [accepting, setAccepting] = useState(false);
+
+  const [credsOpen, setCredsOpen] = useState(false);
+  const [credsEmail, setCredsEmail] = useState("");
+  const [credsPassword, setCredsPassword] = useState("");
+  const [credsSaving, setCredsSaving] = useState(false);
+  const [credsResult, setCredsResult] = useState<{
+    email: string;
+    temporary_password: string;
+  } | null>(null);
+  const [credsCopied, setCredsCopied] = useState(false);
 
   const loadShop = useCallback(async () => {
     try {
@@ -239,13 +276,72 @@ export default function ShopDetailPage() {
     }
   };
 
-  const toggleActive = async () => {
+  const deactivateShop = async () => {
     setError("");
     try {
       await api.post(`/api/v1/admin/shops/${id}/toggle`);
       await loadShop();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to toggle status");
+      setError(e instanceof Error ? e.message : "Failed to deactivate");
+    }
+  };
+
+  const runVerify = async () => {
+    setVerifying(true);
+    setError("");
+    try {
+      const res = await api.post<VerifyResponse>(
+        `/api/v1/admin/shops/${id}/verify`,
+      );
+      setVerifyResult(res);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Verification call failed");
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  const submitCredentials = async () => {
+    setCredsSaving(true);
+    setError("");
+    setCredsCopied(false);
+    try {
+      const body: Record<string, string> = { email: credsEmail.trim() };
+      if (credsPassword.trim()) body.password = credsPassword.trim();
+      const res = await api.post<{
+        email: string;
+        temporary_password: string;
+      }>(`/api/v1/admin/shops/${id}/credentials`, body);
+      setCredsResult({
+        email: res.email,
+        temporary_password: res.temporary_password,
+      });
+      setCredsPassword("");
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to save credentials");
+    } finally {
+      setCredsSaving(false);
+    }
+  };
+
+  const closeCredsModal = () => {
+    setCredsOpen(false);
+    setCredsResult(null);
+    setCredsEmail("");
+    setCredsPassword("");
+    setCredsCopied(false);
+  };
+
+  const acceptShop = async () => {
+    setAccepting(true);
+    setError("");
+    try {
+      await api.post(`/api/v1/admin/shops/${id}/accept`);
+      await loadShop();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Activation failed");
+    } finally {
+      setAccepting(false);
     }
   };
 
@@ -310,7 +406,19 @@ export default function ShopDetailPage() {
             </div>
           )}
           <div>
-            <h1 className="text-2xl font-bold">{shop.name}</h1>
+            <div className="flex items-center gap-2">
+              <h1 className="text-2xl font-bold">{shop.name}</h1>
+              <span
+                className={cn(
+                  "px-2 py-0.5 rounded text-[10px] font-medium uppercase tracking-wide",
+                  shop.is_active
+                    ? "bg-success/10 text-success"
+                    : "bg-muted text-muted-foreground",
+                )}
+              >
+                {shop.is_active ? "Active" : "Inactive"}
+              </span>
+            </div>
             <p className="text-sm text-muted-foreground">
               Created {formatDate(shop.created_at)}
             </p>
@@ -362,21 +470,129 @@ export default function ShopDetailPage() {
             Export Analytics
           </button>
           <button
-            onClick={toggleActive}
-            className={`px-4 py-2 rounded-lg text-sm font-medium ${
-              shop.is_active
-                ? "bg-danger/10 text-danger hover:bg-danger/20"
-                : "bg-success/10 text-success hover:bg-success/20"
-            } transition-colors`}
+            onClick={runVerify}
+            disabled={verifying}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium text-primary bg-primary/10 hover:bg-primary/20 disabled:opacity-50 transition-colors"
           >
-            {shop.is_active ? "Deactivate" : "Activate"}
+            {verifying ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <ShieldCheck className="w-3.5 h-3.5" />
+            )}
+            {verifying ? "Verifying..." : "Run verification"}
           </button>
+          <button
+            onClick={() => {
+              setCredsEmail("");
+              setCredsPassword("");
+              setCredsResult(null);
+              setCredsOpen(true);
+            }}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted border border-border transition-colors"
+          >
+            <KeyRound className="w-3.5 h-3.5" />
+            Set login credentials
+          </button>
+          {shop.is_active ? (
+            <button
+              onClick={deactivateShop}
+              className="px-4 py-2 rounded-lg text-sm font-medium bg-danger/10 text-danger hover:bg-danger/20 transition-colors"
+            >
+              Deactivate
+            </button>
+          ) : null}
         </div>
       </div>
 
       {error && (
         <div className="mb-4 px-4 py-2 rounded-lg bg-danger/10 text-danger text-sm">
           {error}
+        </div>
+      )}
+
+      {verifyResult && (
+        <div className="mb-6 bg-card border border-border rounded-xl p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-semibold">Meta credential checks</h3>
+              {verifyResult.ok ? (
+                <span className="inline-flex items-center gap-1 text-xs text-success font-medium">
+                  <Check size={12} /> all passed
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 text-xs text-danger font-medium">
+                  <X size={12} /> checks failed
+                </span>
+              )}
+            </div>
+            <button
+              onClick={() => setVerifyResult(null)}
+              className="text-xs text-muted-foreground hover:text-foreground"
+              aria-label="Dismiss"
+            >
+              Dismiss
+            </button>
+          </div>
+
+          <div className="space-y-4">
+            {verifyResult.results.map((platform) => (
+              <div key={platform.platform}>
+                <div className="flex items-center gap-2 text-sm font-medium mb-2">
+                  <span className="capitalize">{platform.platform}</span>
+                  {platform.ok ? (
+                    <span className="inline-flex items-center gap-1 text-xs text-success">
+                      <Check size={12} /> passed
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 text-xs text-danger">
+                      <X size={12} /> failed
+                    </span>
+                  )}
+                </div>
+                <ul className="space-y-1 text-xs pl-1">
+                  {platform.checks.map((c, i) => (
+                    <li key={i} className="flex items-start gap-2">
+                      {c.ok ? (
+                        <Check
+                          size={12}
+                          className="text-success mt-0.5 shrink-0"
+                        />
+                      ) : (
+                        <X size={12} className="text-danger mt-0.5 shrink-0" />
+                      )}
+                      <span>
+                        <span className="font-mono">{c.name}</span>
+                        {c.detail && (
+                          <span className="text-muted-foreground">
+                            {" "}
+                            — {c.detail}
+                          </span>
+                        )}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+
+          {!shop.is_active && (
+            <div className="mt-4 pt-4 border-t border-border flex items-center justify-between">
+              <p className="text-xs text-muted-foreground">
+                {verifyResult.ok
+                  ? "All checks passed. You can activate this shop now."
+                  : "Fix the failing checks above, save, and re-run verification."}
+              </p>
+              <button
+                onClick={acceptShop}
+                disabled={accepting || !verifyResult.ok}
+                className="flex items-center gap-1 px-4 py-2 rounded-lg bg-success text-white text-sm font-medium hover:opacity-90 disabled:opacity-50 transition-opacity"
+              >
+                {accepting ? "Activating..." : "Accept & Activate"}
+                <Check size={14} />
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -910,6 +1126,149 @@ export default function ShopDetailPage() {
               )}
             </>
           )}
+        </div>
+      )}
+
+      {credsOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
+          onClick={closeCredsModal}
+        >
+          <div
+            className="bg-card border border-border rounded-xl shadow-xl w-full max-w-md p-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-semibold flex items-center gap-2">
+                <KeyRound className="w-4 h-4" />
+                Set login credentials
+              </h3>
+              <button
+                onClick={closeCredsModal}
+                className="text-muted-foreground hover:text-foreground"
+                aria-label="Close"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {!credsResult ? (
+              <div className="space-y-4">
+                <p className="text-xs text-muted-foreground">
+                  The shop owner will be required to change this password on
+                  first login. Share both fields with them over a trusted
+                  channel (WhatsApp DM, in-person).
+                </p>
+
+                <div>
+                  <label className="block text-xs font-medium mb-1">Email</label>
+                  <input
+                    type="email"
+                    value={credsEmail}
+                    onChange={(e) => setCredsEmail(e.target.value)}
+                    placeholder="owner@shop.com"
+                    className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium mb-1">
+                    Password (leave blank to generate)
+                  </label>
+                  <input
+                    type="text"
+                    value={credsPassword}
+                    onChange={(e) => setCredsPassword(e.target.value)}
+                    placeholder="Auto-generate a 12-char password"
+                    className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 font-mono"
+                  />
+                  <p className="text-[10px] text-muted-foreground mt-1">
+                    Min 8 chars, at least one letter and one digit.
+                  </p>
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2">
+                  <button
+                    onClick={closeCredsModal}
+                    className="px-4 py-2 rounded-lg text-sm text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={submitCredentials}
+                    disabled={credsSaving || !credsEmail.trim()}
+                    className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 disabled:opacity-50 transition-opacity"
+                  >
+                    {credsSaving ? "Saving..." : "Generate & save"}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="flex items-start gap-2 text-xs bg-warning/10 text-warning border border-warning/20 rounded-lg p-3">
+                  <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+                  <span>
+                    Copy this now — the password is not stored in plaintext
+                    anywhere and cannot be retrieved again.
+                  </span>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium mb-1">
+                    Email
+                  </label>
+                  <div className="px-3 py-2 rounded-lg border border-border bg-muted/30 text-sm font-mono break-all">
+                    {credsResult.email}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium mb-1">
+                    Temporary password
+                  </label>
+                  <div className="flex gap-2">
+                    <div className="flex-1 px-3 py-2 rounded-lg border border-border bg-muted/30 text-sm font-mono break-all">
+                      {credsResult.temporary_password}
+                    </div>
+                    <button
+                      onClick={() => {
+                        navigator.clipboard
+                          .writeText(
+                            `Email: ${credsResult.email}\nPassword: ${credsResult.temporary_password}`,
+                          )
+                          .then(() => {
+                            setCredsCopied(true);
+                            setTimeout(() => setCredsCopied(false), 2000);
+                          });
+                      }}
+                      className="px-3 py-2 rounded-lg border border-border text-xs font-medium hover:bg-muted transition-colors flex items-center gap-1.5"
+                    >
+                      {credsCopied ? (
+                        <>
+                          <Check size={12} className="text-success" />
+                          Copied
+                        </>
+                      ) : (
+                        <>
+                          <Copy size={12} />
+                          Copy both
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex justify-end pt-2">
+                  <button
+                    onClick={closeCredsModal}
+                    className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition-opacity"
+                  >
+                    Done
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>

@@ -57,17 +57,57 @@ class RedisClient:
         data = await self.client.get(key)
         return json.loads(data) if data else None
 
+    # Lua script: atomically GET → deserialize → append → trim → SET
+    # Runs entirely on the Redis server — no race window between GET and SET.
+    _APPEND_HISTORY_LUA = """
+local key = KEYS[1]
+local msg = ARGV[1]
+local max_messages = tonumber(ARGV[2])
+local ttl = tonumber(ARGV[3])
+
+local raw = redis.call('GET', key)
+local history
+if raw then
+    history = cjson.decode(raw)
+else
+    history = {}
+end
+
+table.insert(history, cjson.decode(msg))
+
+-- Trim to last max_messages entries
+local len = #history
+if len > max_messages then
+    local trimmed = {}
+    for i = len - max_messages + 1, len do
+        table.insert(trimmed, history[i])
+    end
+    history = trimmed
+end
+
+redis.call('SET', key, cjson.encode(history), 'EX', ttl)
+return 1
+"""
+
     async def append_to_history(
         self, conversation_id: str, message: dict
     ) -> None:
-        """Append a message to cached history, trimming to last 50."""
+        """Append a message to cached history, trimming to last 50.
+
+        Atomic: implemented as a Redis Lua script so concurrent workers on the
+        same conversation cannot interleave their GET/SET pairs and lose a
+        message.
+        """
         key = f"conv:{conversation_id}:history"
-        history = await self.get_conversation_history(conversation_id)
-        if history is None:
-            history = []
-        history.append(message)
-        history = history[-50:]  # keep last 50 messages in cache
-        await self.client.set(key, json.dumps(history, default=str), ex=HISTORY_TTL)
+        msg_json = json.dumps(message, default=str)
+        await self.client.eval(
+            self._APPEND_HISTORY_LUA,
+            1,          # number of keys
+            key,        # KEYS[1]
+            msg_json,   # ARGV[1]
+            50,         # ARGV[2] — max_messages
+            HISTORY_TTL,  # ARGV[3]
+        )
 
     async def invalidate_conversation_history(self, conversation_id: str) -> None:
         """Delete cached history, forcing a fresh load from DB next time."""
@@ -165,6 +205,55 @@ class RedisClient:
     async def record_success(self, service: str = "gemini") -> None:
         """Record a success and reset failure counters."""
         await self.client.delete(f"circuit:{service}:failures")
+
+    # ─── Shop Auth: login attempts, lockout, token blacklist ────────────
+
+    async def incr_login_attempt_ip(
+        self, ip: str, window_seconds: int = 900
+    ) -> int:
+        """Atomically bump per-IP login attempt counter. Returns new count."""
+        key = f"auth:ip_attempts:{ip}"
+        count = await self.client.incr(key)
+        if count == 1:
+            await self.client.expire(key, window_seconds)
+        return int(count)
+
+    async def get_login_failures_email(self, email: str) -> int:
+        """Read the per-email failure counter without mutating."""
+        val = await self.client.get(f"auth:email_failures:{email.lower()}")
+        return int(val) if val else 0
+
+    async def incr_login_failure_email(
+        self, email: str, window_seconds: int = 900
+    ) -> int:
+        """Bump per-email failure counter. Returns new count.
+
+        Only call this on an actual failed authentication — not on every
+        login attempt.
+        """
+        key = f"auth:email_failures:{email.lower()}"
+        count = await self.client.incr(key)
+        if count == 1:
+            await self.client.expire(key, window_seconds)
+        return int(count)
+
+    async def clear_login_failures_email(self, email: str) -> None:
+        """Called after a successful login."""
+        await self.client.delete(f"auth:email_failures:{email.lower()}")
+
+    async def blacklist_token(self, jti: str, ttl_seconds: int) -> None:
+        """Mark a JWT jti revoked until its natural expiry.
+
+        TTL matches the remaining lifetime of the token so the blacklist
+        never grows unbounded — entries self-expire when the token would
+        have expired anyway.
+        """
+        if ttl_seconds <= 0:
+            return
+        await self.client.set(f"auth:blacklist:{jti}", "1", ex=ttl_seconds)
+
+    async def is_token_blacklisted(self, jti: str) -> bool:
+        return await self.client.exists(f"auth:blacklist:{jti}") == 1
 
     # ─── Shop Context Cache ──────────────────────────────────────────────
 

@@ -3,9 +3,21 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
-import { ChevronLeft, ChevronRight, Check } from "lucide-react";
+import { ChevronLeft, ChevronRight, Check, X, Loader2 } from "lucide-react";
 
-const STEPS = ["Shop Info", "Branding", "Platforms", "AI Context", "Review"];
+const STEPS = ["Shop Info", "Branding", "Platforms", "AI Context", "Review", "Verify"];
+
+type VerifyCheck = { name: string; ok: boolean; detail?: string };
+type VerifyPlatformResult = {
+  platform: string;
+  ok: boolean;
+  checks: VerifyCheck[];
+};
+type VerifyResponse = {
+  shop_id: string;
+  ok: boolean;
+  results: VerifyPlatformResult[];
+};
 
 export default function OnboardPage() {
   const router = useRouter();
@@ -28,6 +40,11 @@ export default function OnboardPage() {
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [error, setError] = useState("");
 
+  const [createdShopId, setCreatedShopId] = useState<string | null>(null);
+  const [verifying, setVerifying] = useState(false);
+  const [verifyResult, setVerifyResult] = useState<VerifyResponse | null>(null);
+  const [accepting, setAccepting] = useState(false);
+
   const addContext = () => {
     if (!newCtx.content.trim()) return;
     setContexts([...contexts, { ...newCtx }]);
@@ -38,7 +55,23 @@ export default function OnboardPage() {
     setContexts(contexts.filter((_, idx) => idx !== i));
   };
 
-  const handleSubmit = async () => {
+  const runVerify = async (shopId: string) => {
+    setVerifying(true);
+    setError("");
+    try {
+      const res = await api.post<VerifyResponse>(
+        `/api/v1/admin/shops/${shopId}/verify`,
+      );
+      setVerifyResult(res);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Verification call failed");
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  // Create shop + upload logo + add contexts, then advance to Verify step.
+  const handleCreateAndAdvance = async () => {
     setSaving(true);
     setError("");
     try {
@@ -54,9 +87,12 @@ export default function OnboardPage() {
       if (form.wa_access_token)
         shopData.wa_access_token = form.wa_access_token;
 
-      const shop = await api.post<{ id: string }>("/api/v1/admin/shops", shopData);
+      const shop = await api.post<{ id: string }>(
+        "/api/v1/admin/shops",
+        shopData,
+      );
+      setCreatedShopId(shop.id);
 
-      // Upload logo (non-blocking — shop already created)
       if (logoFile) {
         try {
           const fd = new FormData();
@@ -67,7 +103,6 @@ export default function OnboardPage() {
         }
       }
 
-      // Add context items
       for (const ctx of contexts) {
         try {
           await api.post(`/api/v1/admin/shops/${shop.id}/context`, ctx);
@@ -76,12 +111,31 @@ export default function OnboardPage() {
         }
       }
 
-      router.push(`/shops/${shop.id}`);
+      setStep(5);
+      await runVerify(shop.id);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to create shop");
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleAccept = async () => {
+    if (!createdShopId) return;
+    setAccepting(true);
+    setError("");
+    try {
+      await api.post(`/api/v1/admin/shops/${createdShopId}/accept`);
+      router.push(`/shops/${createdShopId}`);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Activation failed");
+    } finally {
+      setAccepting(false);
+    }
+  };
+
+  const handleFinishInactive = () => {
+    if (createdShopId) router.push(`/shops/${createdShopId}`);
   };
 
   return (
@@ -344,6 +398,91 @@ export default function OnboardPage() {
               <strong>Context items:</strong> {contexts.length}
             </p>
           </div>
+          <p className="text-xs text-muted-foreground">
+            The shop will be created inactive. Next step verifies the Meta
+            credentials before you activate it.
+          </p>
+        </div>
+      )}
+
+      {/* Step 5: Verify */}
+      {step === 5 && (
+        <div className="space-y-4">
+          <div className="bg-card border border-border rounded-lg p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-medium">Meta credential checks</h3>
+              {createdShopId && (
+                <button
+                  onClick={() => runVerify(createdShopId)}
+                  disabled={verifying}
+                  className="text-xs text-primary hover:underline disabled:opacity-50"
+                >
+                  {verifying ? "Running..." : "Re-run"}
+                </button>
+              )}
+            </div>
+
+            {verifying && !verifyResult && (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 size={14} className="animate-spin" />
+                Calling Meta Graph API…
+              </div>
+            )}
+
+            {verifyResult && (
+              <div className="space-y-4">
+                {verifyResult.results.map((platform) => (
+                  <div key={platform.platform}>
+                    <div className="flex items-center gap-2 text-sm font-medium mb-2">
+                      <span className="capitalize">{platform.platform}</span>
+                      {platform.ok ? (
+                        <span className="text-success inline-flex items-center gap-1">
+                          <Check size={14} /> passed
+                        </span>
+                      ) : (
+                        <span className="text-danger inline-flex items-center gap-1">
+                          <X size={14} /> failed
+                        </span>
+                      )}
+                    </div>
+                    <ul className="space-y-1 text-xs pl-1">
+                      {platform.checks.map((c, i) => (
+                        <li key={i} className="flex items-start gap-2">
+                          {c.ok ? (
+                            <Check
+                              size={12}
+                              className="text-success mt-0.5 shrink-0"
+                            />
+                          ) : (
+                            <X
+                              size={12}
+                              className="text-danger mt-0.5 shrink-0"
+                            />
+                          )}
+                          <span>
+                            <span className="font-mono">{c.name}</span>
+                            {c.detail && (
+                              <span className="text-muted-foreground">
+                                {" "}
+                                — {c.detail}
+                              </span>
+                            )}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {verifyResult && !verifyResult.ok && (
+            <p className="text-xs text-muted-foreground">
+              Fix the credentials in the shop detail page, then re-run. The
+              shop stays inactive until all checks pass.
+            </p>
+          )}
         </div>
       )}
 
@@ -357,13 +496,13 @@ export default function OnboardPage() {
       <div className="flex justify-between mt-8">
         <button
           onClick={() => setStep(step - 1)}
-          disabled={step === 0}
+          disabled={step === 0 || step === 5}
           className="flex items-center gap-1 px-4 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
         >
           <ChevronLeft size={16} /> Back
         </button>
 
-        {step < STEPS.length - 1 ? (
+        {step < 4 && (
           <button
             onClick={() => setStep(step + 1)}
             disabled={step === 0 && !form.name.trim()}
@@ -371,15 +510,42 @@ export default function OnboardPage() {
           >
             Next <ChevronRight size={16} />
           </button>
-        ) : (
+        )}
+
+        {step === 4 && (
           <button
-            onClick={handleSubmit}
+            onClick={handleCreateAndAdvance}
             disabled={saving}
-            className="flex items-center gap-1 px-6 py-2 rounded-lg bg-success text-white text-sm font-medium hover:opacity-90 disabled:opacity-50 transition-opacity"
+            className="flex items-center gap-1 px-6 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 disabled:opacity-50 transition-opacity"
           >
-            {saving ? "Creating..." : "Create Shop"}
-            <Check size={16} />
+            {saving ? "Creating..." : "Create & Verify"}
+            <ChevronRight size={16} />
           </button>
+        )}
+
+        {step === 5 && (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleFinishInactive}
+              disabled={accepting || !createdShopId}
+              className="px-4 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
+            >
+              Save inactive
+            </button>
+            <button
+              onClick={handleAccept}
+              disabled={
+                accepting ||
+                verifying ||
+                !verifyResult?.ok ||
+                !createdShopId
+              }
+              className="flex items-center gap-1 px-6 py-2 rounded-lg bg-success text-white text-sm font-medium hover:opacity-90 disabled:opacity-50 transition-opacity"
+            >
+              {accepting ? "Activating..." : "Accept & Activate"}
+              <Check size={16} />
+            </button>
+          </div>
         )}
       </div>
     </div>

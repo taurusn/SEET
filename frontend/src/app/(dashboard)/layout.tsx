@@ -9,6 +9,7 @@ import { StaticLogo } from "@/components/static-logo";
 import { useSSE, notifyHandoff, SSEEvent } from "@/lib/sse";
 import { generateTheme, applyTheme, clearTheme } from "@/lib/theme";
 import Image from "next/image";
+import { AlertTriangle } from "lucide-react";
 
 export default function DashboardLayout({
   children,
@@ -18,6 +19,11 @@ export default function DashboardLayout({
   const { token, shop, loading } = useAuth();
   const router = useRouter();
   const [showSplash, setShowSplash] = useState(false);
+  const [reauthBanner, setReauthBanner] = useState<{
+    platform: string;
+    reason: string;
+  } | null>(null);
+  const [aiDegraded, setAiDegraded] = useState(false);
 
   // White-label theme: apply cached palette immediately to prevent flash
   useLayoutEffect(() => {
@@ -51,6 +57,14 @@ export default function DashboardLayout({
     }
   }, [token, loading, router]);
 
+  // Force password rotation when the shop is flagged (admin-issued temp
+  // credentials). Blocks access to every dashboard route until resolved.
+  useEffect(() => {
+    if (!loading && token && shop?.must_change_password) {
+      router.push("/change-password");
+    }
+  }, [loading, token, shop, router]);
+
   useEffect(() => {
     if (!loading && token && shop) {
       const splashKey = `splash_shown_${shop.id}`;
@@ -71,6 +85,18 @@ export default function DashboardLayout({
       const d = event.data as { customer_id?: string; reason?: string };
       notifyHandoff(d.customer_id || "", d.reason);
     }
+
+    if (event.type === "shop_deactivated") {
+      const d = event.data as { platform?: string; reason?: string };
+      setReauthBanner({
+        platform: d.platform || "unknown",
+        reason: d.reason || "unknown",
+      });
+    }
+
+    if (event.type === "ai_degraded") {
+      setAiDegraded(true);
+    }
   }, []);
 
   useSSE(handleSSE);
@@ -84,6 +110,9 @@ export default function DashboardLayout({
   }
 
   if (!token) return null;
+  // Forced-change pending — don't render dashboard; the effect above
+  // has already pushed to /change-password.
+  if (shop?.must_change_password) return null;
 
   return (
     <div className="min-h-screen">
@@ -123,6 +152,58 @@ export default function DashboardLayout({
           )}
         </div>
       </header>
+
+      {reauthBanner && (
+        <div className="bg-danger/10 border-b border-danger/20">
+          <div className="max-w-7xl mx-auto px-4 md:px-8 py-3 flex items-start gap-3">
+            <AlertTriangle
+              className="w-5 h-5 text-danger shrink-0 mt-0.5"
+              aria-hidden="true"
+            />
+            <div className="flex-1 text-sm">
+              <p className="font-medium text-danger">
+                الربط مع {reauthBanner.platform === "instagram" ? "إنستغرام" : reauthBanner.platform === "whatsapp" ? "واتساب" : "Meta"} انتهى
+              </p>
+              <p className="text-muted-foreground mt-0.5">
+                الردود الآلية متوقفة مؤقتًا. تواصل مع المسؤول لتجديد الاعتماد.
+              </p>
+            </div>
+            <button
+              onClick={() => setReauthBanner(null)}
+              className="text-xs text-muted-foreground hover:text-foreground"
+              aria-label="إخفاء"
+            >
+              إخفاء
+            </button>
+          </div>
+        </div>
+      )}
+
+      {aiDegraded && (
+        <div className="bg-warning/10 border-b border-warning/20">
+          <div className="max-w-7xl mx-auto px-4 md:px-8 py-3 flex items-start gap-3">
+            <AlertTriangle
+              className="w-5 h-5 text-warning shrink-0 mt-0.5"
+              aria-hidden="true"
+            />
+            <div className="flex-1 text-sm">
+              <p className="font-medium text-warning">
+                الذكاء الاصطناعي يعمل بوضع محدود
+              </p>
+              <p className="text-muted-foreground mt-0.5">
+                الردود الآلية ترجع برسائل عامة مؤقتًا. يُنصح بتولي المحادثات يدويًا حتى تعود الخدمة.
+              </p>
+            </div>
+            <button
+              onClick={() => setAiDegraded(false)}
+              className="text-xs text-muted-foreground hover:text-foreground"
+              aria-label="إخفاء"
+            >
+              إخفاء
+            </button>
+          </div>
+        </div>
+      )}
 
       <Dock />
       <main className="min-h-[calc(100vh-3.5rem)] pb-28">
