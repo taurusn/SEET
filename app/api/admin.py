@@ -228,6 +228,10 @@ async def list_all_shops(
             wa_phone_number_id=shop.wa_phone_number_id,
             wa_waba_id=shop.wa_waba_id,
             is_active=shop.is_active,
+            moderation_mode=shop.moderation_mode or "auto",
+            meta_app_id=shop.meta_app_id,
+            has_meta_app_secret=bool(shop.meta_app_secret),
+            meta_verify_token=shop.meta_verify_token,
             logo_url=shop.logo_url,
             brand_color=shop.brand_color,
             splash_text=shop.splash_text,
@@ -258,6 +262,9 @@ async def create_shop(
         wa_phone_number_id=data.wa_phone_number_id,
         wa_waba_id=data.wa_waba_id,
         wa_access_token=encrypt_token(data.wa_access_token) if data.wa_access_token else None,
+        meta_app_id=data.meta_app_id,
+        meta_app_secret=encrypt_token(data.meta_app_secret) if data.meta_app_secret else None,
+        meta_verify_token=data.meta_verify_token,
         logo_url=data.logo_url,
         brand_color=data.brand_color,
         splash_text=data.splash_text,
@@ -452,6 +459,9 @@ async def get_shop_detail(
         wa_waba_id=shop.wa_waba_id,
         is_active=shop.is_active,
         moderation_mode=shop.moderation_mode or "auto",
+        meta_app_id=shop.meta_app_id,
+        has_meta_app_secret=bool(shop.meta_app_secret),
+        meta_verify_token=shop.meta_verify_token,
         logo_url=shop.logo_url,
         brand_color=shop.brand_color,
         splash_text=shop.splash_text,
@@ -481,6 +491,8 @@ async def update_shop(
         update_data["ig_access_token"] = encrypt_token(update_data["ig_access_token"])
     if "wa_access_token" in update_data and update_data["wa_access_token"]:
         update_data["wa_access_token"] = encrypt_token(update_data["wa_access_token"])
+    if "meta_app_secret" in update_data and update_data["meta_app_secret"]:
+        update_data["meta_app_secret"] = encrypt_token(update_data["meta_app_secret"])
 
     for key, value in update_data.items():
         setattr(shop, key, value)

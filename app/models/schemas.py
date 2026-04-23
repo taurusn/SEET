@@ -41,6 +41,13 @@ class Shop(Base):
     wa_waba_id = Column(String(100), nullable=True)
     wa_access_token = Column(Text, nullable=True)  # stored encrypted
     token_expires_at = Column(DateTime(timezone=True), nullable=True)
+    # Per-shop Meta App (no SEET-level Business Portfolio required).
+    # Nullable during migration — shops without these fall back to the
+    # global META_APP_SECRET / META_VERIFY_TOKEN in .env via the legacy
+    # /webhook/instagram and /webhook/whatsapp URLs.
+    meta_app_id = Column(String(100), nullable=True)
+    meta_app_secret = Column(Text, nullable=True)  # stored encrypted
+    meta_verify_token = Column(String(128), nullable=True)
     is_active = Column(Boolean, default=True)
     # 'auto' = today's default (AI replies immediately),
     # 'pending' = inbound messages queue for admin approval before AI runs.
@@ -250,6 +257,10 @@ class ShopCreate(BaseModel):
     wa_phone_number_id: Optional[str] = None
     wa_waba_id: Optional[str] = None
     wa_access_token: Optional[str] = None
+    # Per-shop Meta App — each shop brings their own, no SEET CR needed.
+    meta_app_id: Optional[str] = None
+    meta_app_secret: Optional[str] = None
+    meta_verify_token: Optional[str] = None
 
 
 class ShopRegister(BaseModel):
@@ -288,6 +299,10 @@ class ShopUpdate(BaseModel):
     logo_url: Optional[str] = None
     brand_color: Optional[str] = None
     splash_text: Optional[str] = None
+    # Per-shop Meta App credentials
+    meta_app_id: Optional[str] = None
+    meta_app_secret: Optional[str] = None
+    meta_verify_token: Optional[str] = None
 
 
 class ShopResponse(BaseModel):
@@ -300,6 +315,9 @@ class ShopResponse(BaseModel):
     wa_waba_id: Optional[str] = None
     is_active: bool
     moderation_mode: str = "auto"
+    # meta_app_id is public (appears in URLs); safe to expose.
+    # meta_app_secret + meta_verify_token are NEVER exposed via API.
+    meta_app_id: Optional[str] = None
     logo_url: Optional[str] = None
     brand_color: Optional[str] = None
     splash_text: Optional[str] = None
@@ -542,6 +560,12 @@ class AdminShopCreate(BaseModel):
     wa_phone_number_id: Optional[str] = None
     wa_waba_id: Optional[str] = None
     wa_access_token: Optional[str] = None
+    # Per-shop Meta App — optional at create time, can be filled in later
+    # via PATCH /admin/shops/{id} as the onboarding admin walks through
+    # the Meta Developer dashboard.
+    meta_app_id: Optional[str] = None
+    meta_app_secret: Optional[str] = None
+    meta_verify_token: Optional[str] = None
     logo_url: Optional[str] = None
     brand_color: Optional[str] = None
     splash_text: Optional[str] = None
@@ -555,6 +579,12 @@ class AdminShopResponse(BaseModel):
     wa_waba_id: Optional[str] = None
     is_active: bool
     moderation_mode: str = "auto"
+    # Per-shop Meta App fields — app_id is public, the other two are
+    # exposed as presence-booleans only so the admin UI can show a
+    # "configured ✓" state without leaking secrets.
+    meta_app_id: Optional[str] = None
+    has_meta_app_secret: bool = False
+    meta_verify_token: Optional[str] = None  # admin needs to see this to copy to Meta dashboard
     logo_url: Optional[str] = None
     brand_color: Optional[str] = None
     splash_text: Optional[str] = None

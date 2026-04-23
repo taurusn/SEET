@@ -380,6 +380,10 @@ async def process_message(msg: dict) -> None:
     """Process a single inbound message from the queue."""
     platform = msg["platform"]
     payload = msg["payload"]
+    # New: per-shop webhook path puts shop_id in the envelope so we don't
+    # need a lookup by page_id / phone_number_id. Legacy webhooks don't
+    # set this field — we fall back to the identify_shop() lookup below.
+    envelope_shop_id = msg.get("shop_id")
 
     # Extract individual messages from the webhook payload
     if platform == "instagram":
@@ -402,16 +406,52 @@ async def process_message(msg: dict) -> None:
         # Process each message in its own DB session for isolation
         try:
             async with async_session_factory() as db:
-                # Identify shop
-                if platform == "instagram":
-                    identifier = item.get("page_id", "")
-                else:
-                    identifier = item.get("phone_number_id", "")
+                if envelope_shop_id:
+                    # Trust the URL: per-shop webhook already HMAC-verified
+                    # against this shop's app_secret. Fetch by PK.
+                    shop_row = await db.execute(
+                        select(Shop).where(
+                            Shop.id == envelope_shop_id,
+                            Shop.is_active == True,  # noqa: E712
+                        )
+                    )
+                    shop = shop_row.scalar_one_or_none()
+                    if not shop:
+                        logger.warning(
+                            "Per-shop webhook for inactive/unknown shop %s",
+                            envelope_shop_id,
+                        )
+                        continue
 
-                shop = await identify_shop(db, platform, identifier)
-                if not shop:
-                    logger.warning("No active shop found for %s: %s", platform, identifier)
-                    continue
+                    # Sanity-check the payload's identifier matches — guards
+                    # against a wrong shop's Meta App hitting the wrong URL.
+                    if platform == "instagram":
+                        payload_id = item.get("page_id", "")
+                        if payload_id and shop.ig_page_id and payload_id != shop.ig_page_id:
+                            logger.warning(
+                                "IG page_id mismatch on shop %s: envelope=%s payload=%s",
+                                shop.id, shop.ig_page_id, payload_id,
+                            )
+                            continue
+                    else:
+                        payload_id = item.get("phone_number_id", "")
+                        if payload_id and shop.wa_phone_number_id and payload_id != shop.wa_phone_number_id:
+                            logger.warning(
+                                "WA phone_number_id mismatch on shop %s: envelope=%s payload=%s",
+                                shop.id, shop.wa_phone_number_id, payload_id,
+                            )
+                            continue
+                else:
+                    # Legacy webhook path — resolve by payload id.
+                    if platform == "instagram":
+                        identifier = item.get("page_id", "")
+                    else:
+                        identifier = item.get("phone_number_id", "")
+
+                    shop = await identify_shop(db, platform, identifier)
+                    if not shop:
+                        logger.warning("No active shop found for %s: %s", platform, identifier)
+                        continue
 
                 # Rate limiting
                 if not await redis_client.check_rate_limit(str(shop.id)):
