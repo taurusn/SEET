@@ -3,9 +3,40 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
-import { ChevronLeft, ChevronRight, Check, X, Loader2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Check, X, Loader2, Copy } from "lucide-react";
 
-const STEPS = ["Shop Info", "Branding", "Platforms", "AI Context", "Review", "Verify"];
+// Meta App step landed between Branding and Platforms: admins configure
+// the app-level credentials (App ID / Secret / Verify Token) before
+// wiring the platform-specific assets that live under the app.
+const STEPS = [
+  "Shop Info",   // 0
+  "Branding",    // 1
+  "Meta App",    // 2
+  "Platforms",   // 3
+  "AI Context",  // 4
+  "Review",      // 5
+  "Verify",      // 6
+];
+
+function randomToken(length = 32): string {
+  const chars =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  let out = "";
+  const rng = typeof window !== "undefined" && window.crypto
+    ? (n: number) => {
+        const b = new Uint8Array(n);
+        window.crypto.getRandomValues(b);
+        return b;
+      }
+    : (n: number) => {
+        const b = new Uint8Array(n);
+        for (let i = 0; i < n; i++) b[i] = Math.floor(Math.random() * 256);
+        return b;
+      };
+  const bytes = rng(length);
+  for (let i = 0; i < length; i++) out += chars[bytes[i] % chars.length];
+  return out;
+}
 
 type VerifyCheck = { name: string; ok: boolean; detail?: string };
 type VerifyPlatformResult = {
@@ -27,12 +58,26 @@ export default function OnboardPage() {
     name: "",
     brand_color: "",
     splash_text: "",
+    meta_app_id: "",
+    meta_app_secret: "",
+    meta_verify_token: "",
     ig_page_id: "",
     ig_access_token: "",
     wa_phone_number_id: "",
     wa_waba_id: "",
     wa_access_token: "",
   });
+  const [copiedWh, setCopiedWh] = useState<string | null>(null);
+
+  const copyText = (text: string, key: string) => {
+    navigator.clipboard
+      .writeText(text)
+      .then(() => {
+        setCopiedWh(key);
+        setTimeout(() => setCopiedWh((c) => (c === key ? null : c)), 1500);
+      })
+      .catch(() => {});
+  };
   const [contexts, setContexts] = useState<
     { context_type: string; content: string }[]
   >([]);
@@ -78,6 +123,10 @@ export default function OnboardPage() {
       const shopData: Record<string, string> = { name: form.name };
       if (form.brand_color) shopData.brand_color = form.brand_color;
       if (form.splash_text) shopData.splash_text = form.splash_text;
+      if (form.meta_app_id) shopData.meta_app_id = form.meta_app_id;
+      if (form.meta_app_secret) shopData.meta_app_secret = form.meta_app_secret;
+      if (form.meta_verify_token)
+        shopData.meta_verify_token = form.meta_verify_token;
       if (form.ig_page_id) shopData.ig_page_id = form.ig_page_id;
       if (form.ig_access_token)
         shopData.ig_access_token = form.ig_access_token;
@@ -111,7 +160,7 @@ export default function OnboardPage() {
         }
       }
 
-      setStep(5);
+      setStep(6);
       await runVerify(shop.id);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to create shop");
@@ -247,8 +296,81 @@ export default function OnboardPage() {
         </div>
       )}
 
-      {/* Step 2: Platforms */}
+      {/* Step 2: Meta App */}
       {step === 2 && (
+        <div className="space-y-4">
+          <div className="bg-muted/40 border border-border rounded-lg p-3 text-xs text-muted-foreground">
+            This shop&apos;s Meta App lives in the shop owner&apos;s own
+            Meta Business Portfolio. Get the App ID + Secret from{" "}
+            <span className="font-mono">Settings → Basic</span> in their
+            app&apos;s dashboard. Verify Token is any string you pick —
+            you&apos;ll paste it here and into the same app&apos;s webhook
+            config later.
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1">
+              Meta App ID
+            </label>
+            <input
+              value={form.meta_app_id}
+              onChange={(e) => setForm({ ...form, meta_app_id: e.target.value })}
+              placeholder="1234567890123456"
+              className="w-full px-3 py-2 rounded-lg border border-border bg-card text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary/30"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1">
+              App Secret
+            </label>
+            <input
+              type="password"
+              value={form.meta_app_secret}
+              onChange={(e) =>
+                setForm({ ...form, meta_app_secret: e.target.value })
+              }
+              placeholder="Long random string from Settings → Basic"
+              className="w-full px-3 py-2 rounded-lg border border-border bg-card text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary/30"
+            />
+            <p className="text-[11px] text-muted-foreground mt-1">
+              Encrypted at rest. Never logged, never shown after save.
+            </p>
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-sm font-medium">
+                Verify Token
+              </label>
+              <button
+                type="button"
+                onClick={() =>
+                  setForm({ ...form, meta_verify_token: randomToken(32) })
+                }
+                className="text-xs text-primary hover:underline"
+              >
+                Generate one for me
+              </button>
+            </div>
+            <input
+              value={form.meta_verify_token}
+              onChange={(e) =>
+                setForm({ ...form, meta_verify_token: e.target.value })
+              }
+              placeholder="Any random string — 16+ chars"
+              className="w-full px-3 py-2 rounded-lg border border-border bg-card text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary/30"
+            />
+            <p className="text-[11px] text-muted-foreground mt-1">
+              You&apos;ll paste this same value into Meta App → Webhooks
+              → Verify Token when configuring the subscription later.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Step 3: Platforms */}
+      {step === 3 && (
         <div className="space-y-4">
           <h3 className="text-sm font-medium text-muted-foreground">
             Instagram
@@ -302,8 +424,8 @@ export default function OnboardPage() {
         </div>
       )}
 
-      {/* Step 3: AI Context */}
-      {step === 3 && (
+      {/* Step 4: AI Context */}
+      {step === 4 && (
         <div className="space-y-4">
           {contexts.map((ctx, i) => (
             <div
@@ -359,8 +481,8 @@ export default function OnboardPage() {
         </div>
       )}
 
-      {/* Step 4: Review */}
-      {step === 4 && (
+      {/* Step 5: Review */}
+      {step === 5 && (
         <div className="space-y-4 text-sm">
           <div className="bg-card border border-border rounded-lg p-4 space-y-2">
             <p>
@@ -387,6 +509,14 @@ export default function OnboardPage() {
               </p>
             )}
             <p>
+              <strong>Meta App:</strong>{" "}
+              {form.meta_app_id
+                ? `App ID ${form.meta_app_id} — secret ${
+                    form.meta_app_secret ? "set" : "missing"
+                  }, verify token ${form.meta_verify_token ? "set" : "missing"}`
+                : "Not configured"}
+            </p>
+            <p>
               <strong>Instagram:</strong>{" "}
               {form.ig_page_id || "Not configured"}
             </p>
@@ -405,8 +535,8 @@ export default function OnboardPage() {
         </div>
       )}
 
-      {/* Step 5: Verify */}
-      {step === 5 && (
+      {/* Step 6: Verify */}
+      {step === 6 && (
         <div className="space-y-4">
           <div className="bg-card border border-border rounded-lg p-4">
             <div className="flex items-center justify-between mb-3">
@@ -483,6 +613,63 @@ export default function OnboardPage() {
               shop stays inactive until all checks pass.
             </p>
           )}
+
+          {/* Webhook URLs — copy these into the shop's Meta App config */}
+          {createdShopId && (() => {
+            const base =
+              typeof window !== "undefined"
+                ? window.location.origin
+                : "https://seet.cloud";
+            const igUrl = `${base}/webhook/instagram/${createdShopId}`;
+            const waUrl = `${base}/webhook/whatsapp/${createdShopId}`;
+            return (
+              <div className="bg-card border border-border rounded-lg p-4">
+                <h3 className="text-sm font-medium mb-1">
+                  Webhook URLs for Meta App configuration
+                </h3>
+                <p className="text-xs text-muted-foreground mb-3">
+                  Paste these into the shop&apos;s Meta App → Webhooks page
+                  (Instagram and WhatsApp products), using the Verify Token
+                  you entered earlier. Meta will call GET on each URL to
+                  confirm ownership before delivering messages.
+                </p>
+                <div className="space-y-2">
+                  {[
+                    { label: "Instagram", url: igUrl, key: "onboard-ig" },
+                    { label: "WhatsApp", url: waUrl, key: "onboard-wa" },
+                  ].map((w) => (
+                    <div
+                      key={w.key}
+                      className="bg-muted/30 rounded-lg p-3"
+                    >
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-xs font-medium text-muted-foreground">
+                          {w.label}
+                        </span>
+                        <button
+                          onClick={() => copyText(w.url, w.key)}
+                          className="flex items-center gap-1 text-xs text-primary hover:underline"
+                        >
+                          {copiedWh === w.key ? (
+                            <>
+                              <Check size={12} /> copied
+                            </>
+                          ) : (
+                            <>
+                              <Copy size={12} /> copy
+                            </>
+                          )}
+                        </button>
+                      </div>
+                      <div className="font-mono text-[11px] break-all">
+                        {w.url}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -496,13 +683,13 @@ export default function OnboardPage() {
       <div className="flex justify-between mt-8">
         <button
           onClick={() => setStep(step - 1)}
-          disabled={step === 0 || step === 5}
+          disabled={step === 0 || step === 6}
           className="flex items-center gap-1 px-4 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
         >
           <ChevronLeft size={16} /> Back
         </button>
 
-        {step < 4 && (
+        {step < 5 && (
           <button
             onClick={() => setStep(step + 1)}
             disabled={step === 0 && !form.name.trim()}
@@ -512,7 +699,7 @@ export default function OnboardPage() {
           </button>
         )}
 
-        {step === 4 && (
+        {step === 5 && (
           <button
             onClick={handleCreateAndAdvance}
             disabled={saving}
@@ -523,7 +710,7 @@ export default function OnboardPage() {
           </button>
         )}
 
-        {step === 5 && (
+        {step === 6 && (
           <div className="flex items-center gap-2">
             <button
               onClick={handleFinishInactive}

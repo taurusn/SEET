@@ -31,6 +31,10 @@ interface ShopDetail {
   wa_waba_id?: string;
   is_active: boolean;
   moderation_mode: string;
+  // Per-shop Meta App (nullable — populated once admin runs the Meta setup).
+  meta_app_id?: string | null;
+  has_meta_app_secret?: boolean;
+  meta_verify_token?: string | null;
   logo_url?: string;
   brand_color?: string;
   splash_text?: string;
@@ -167,6 +171,26 @@ export default function ShopDetailPage() {
     temporary_password: string;
   } | null>(null);
   const [credsCopied, setCredsCopied] = useState(false);
+
+  // Meta App editor (per-shop architecture)
+  const [metaAppOpen, setMetaAppOpen] = useState(false);
+  const [metaApp, setMetaApp] = useState({
+    meta_app_id: "",
+    meta_app_secret: "",
+    meta_verify_token: "",
+  });
+  const [metaAppSaving, setMetaAppSaving] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
+
+  const copyToClipboard = (text: string, key: string) => {
+    navigator.clipboard
+      .writeText(text)
+      .then(() => {
+        setCopied(key);
+        setTimeout(() => setCopied((c) => (c === key ? null : c)), 1500);
+      })
+      .catch(() => {});
+  };
 
   const loadShop = useCallback(async () => {
     try {
@@ -373,6 +397,41 @@ export default function ShopDetailPage() {
     setCredsEmail("");
     setCredsPassword("");
     setCredsCopied(false);
+  };
+
+  const openMetaEditor = () => {
+    setMetaApp({
+      meta_app_id: shop?.meta_app_id || "",
+      meta_app_secret: "", // never prefilled — enter to update
+      meta_verify_token: shop?.meta_verify_token || "",
+    });
+    setMetaAppOpen(true);
+  };
+
+  const saveMetaApp = async () => {
+    setMetaAppSaving(true);
+    setError("");
+    try {
+      // PATCH only sends fields the admin actually touched so blank
+      // meta_app_secret doesn't wipe the stored one.
+      const body: Record<string, string> = {};
+      const newId = metaApp.meta_app_id.trim();
+      const newVerify = metaApp.meta_verify_token.trim();
+      const newSecret = metaApp.meta_app_secret.trim();
+      if (newId !== (shop?.meta_app_id || "")) body.meta_app_id = newId;
+      if (newVerify !== (shop?.meta_verify_token || ""))
+        body.meta_verify_token = newVerify;
+      if (newSecret) body.meta_app_secret = newSecret;
+      if (Object.keys(body).length > 0) {
+        await api.patch(`/api/v1/admin/shops/${id}`, body);
+      }
+      await loadShop();
+      setMetaAppOpen(false);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to save Meta App settings");
+    } finally {
+      setMetaAppSaving(false);
+    }
   };
 
   const acceptShop = async () => {
@@ -686,6 +745,161 @@ export default function ShopDetailPage() {
                     </button>
                   );
                 })}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Meta App / webhook configuration */}
+      {(() => {
+        const webhookBase =
+          typeof window !== "undefined" ? window.location.origin : "https://seet.cloud";
+        const igUrl = `${webhookBase}/webhook/instagram/${shop.id}`;
+        const waUrl = `${webhookBase}/webhook/whatsapp/${shop.id}`;
+        const configured = !!shop.meta_app_id && !!shop.has_meta_app_secret;
+        return (
+          <div className="mb-6 bg-card border border-border rounded-xl p-4">
+            <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+              <div>
+                <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">
+                  Meta App / Webhook configuration
+                </h3>
+                <p className="text-xs text-muted-foreground max-w-prose">
+                  Each shop brings their own Meta App. Set the App ID +
+                  Secret below, then copy the URLs and Verify Token into the
+                  shop&apos;s Meta App webhook settings.
+                </p>
+              </div>
+              <button
+                onClick={openMetaEditor}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium text-primary bg-primary/10 hover:bg-primary/20 transition-colors"
+              >
+                <KeyRound className="w-3.5 h-3.5" />
+                {configured ? "Edit Meta App" : "Set Meta App"}
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+              {/* App ID */}
+              <div className="bg-muted/30 rounded-lg p-3">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-muted-foreground font-medium">Meta App ID</span>
+                  {shop.meta_app_id && (
+                    <a
+                      href={`https://developers.facebook.com/apps/${shop.meta_app_id}/dashboard/`}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                      className="text-primary hover:underline"
+                    >
+                      Manage in Meta ↗
+                    </a>
+                  )}
+                </div>
+                <div className="font-mono break-all">
+                  {shop.meta_app_id || (
+                    <span className="text-muted-foreground italic">not set</span>
+                  )}
+                </div>
+              </div>
+
+              {/* App Secret (presence only) */}
+              <div className="bg-muted/30 rounded-lg p-3">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-muted-foreground font-medium">App Secret</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  {shop.has_meta_app_secret ? (
+                    <>
+                      <Check size={12} className="text-success" />
+                      <span className="font-mono">configured</span>
+                    </>
+                  ) : (
+                    <>
+                      <X size={12} className="text-danger" />
+                      <span className="text-muted-foreground italic">not set</span>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {/* Verify Token (copy for Meta dashboard) */}
+              <div className="bg-muted/30 rounded-lg p-3 md:col-span-2">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-muted-foreground font-medium">
+                    Verify Token
+                  </span>
+                  {shop.meta_verify_token && (
+                    <button
+                      onClick={() =>
+                        copyToClipboard(shop.meta_verify_token!, "verify")
+                      }
+                      className="flex items-center gap-1 text-primary hover:underline"
+                    >
+                      {copied === "verify" ? (
+                        <>
+                          <Check size={12} /> copied
+                        </>
+                      ) : (
+                        <>
+                          <Copy size={12} /> copy
+                        </>
+                      )}
+                    </button>
+                  )}
+                </div>
+                <div className="font-mono break-all">
+                  {shop.meta_verify_token || (
+                    <span className="text-muted-foreground italic">not set</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Webhook URLs */}
+              <div className="bg-muted/30 rounded-lg p-3">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-muted-foreground font-medium">
+                    Instagram webhook URL
+                  </span>
+                  <button
+                    onClick={() => copyToClipboard(igUrl, "ig-url")}
+                    className="flex items-center gap-1 text-primary hover:underline"
+                  >
+                    {copied === "ig-url" ? (
+                      <>
+                        <Check size={12} /> copied
+                      </>
+                    ) : (
+                      <>
+                        <Copy size={12} /> copy
+                      </>
+                    )}
+                  </button>
+                </div>
+                <div className="font-mono break-all text-[11px]">{igUrl}</div>
+              </div>
+
+              <div className="bg-muted/30 rounded-lg p-3">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-muted-foreground font-medium">
+                    WhatsApp webhook URL
+                  </span>
+                  <button
+                    onClick={() => copyToClipboard(waUrl, "wa-url")}
+                    className="flex items-center gap-1 text-primary hover:underline"
+                  >
+                    {copied === "wa-url" ? (
+                      <>
+                        <Check size={12} /> copied
+                      </>
+                    ) : (
+                      <>
+                        <Copy size={12} /> copy
+                      </>
+                    )}
+                  </button>
+                </div>
+                <div className="font-mono break-all text-[11px]">{waUrl}</div>
               </div>
             </div>
           </div>
@@ -1222,6 +1436,115 @@ export default function ShopDetailPage() {
               )}
             </>
           )}
+        </div>
+      )}
+
+      {metaAppOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
+          onClick={() => !metaAppSaving && setMetaAppOpen(false)}
+        >
+          <div
+            className="bg-card border border-border rounded-xl shadow-xl w-full max-w-md p-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-semibold flex items-center gap-2">
+                <KeyRound className="w-4 h-4" />
+                Meta App credentials
+              </h3>
+              <button
+                onClick={() => setMetaAppOpen(false)}
+                className="text-muted-foreground hover:text-foreground"
+                aria-label="Close"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <p className="text-xs text-muted-foreground">
+                From the shop&apos;s Meta App dashboard: App ID + App
+                Secret are on <span className="font-mono">Settings → Basic</span>.
+                The Verify Token is whatever you type in the app&apos;s
+                webhook config — pick a string and put it in both places.
+              </p>
+
+              <div>
+                <label className="block text-xs font-medium mb-1">
+                  App ID <span className="text-muted-foreground font-normal">(public, shown in Meta URLs)</span>
+                </label>
+                <input
+                  type="text"
+                  value={metaApp.meta_app_id}
+                  onChange={(e) =>
+                    setMetaApp({ ...metaApp, meta_app_id: e.target.value })
+                  }
+                  placeholder="1234567890123456"
+                  className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium mb-1">
+                  App Secret
+                  {shop.has_meta_app_secret && (
+                    <span className="ml-2 text-muted-foreground font-normal">
+                      (leave blank to keep current)
+                    </span>
+                  )}
+                </label>
+                <input
+                  type="password"
+                  value={metaApp.meta_app_secret}
+                  onChange={(e) =>
+                    setMetaApp({ ...metaApp, meta_app_secret: e.target.value })
+                  }
+                  placeholder={
+                    shop.has_meta_app_secret
+                      ? "••••••••••••••••••••••••••••••••"
+                      : "Paste the app secret"
+                  }
+                  className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 font-mono"
+                />
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  Encrypted at rest with the ENCRYPTION_KEY.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium mb-1">
+                  Verify Token <span className="text-muted-foreground font-normal">(shared with Meta webhook config)</span>
+                </label>
+                <input
+                  type="text"
+                  value={metaApp.meta_verify_token}
+                  onChange={(e) =>
+                    setMetaApp({ ...metaApp, meta_verify_token: e.target.value })
+                  }
+                  placeholder="anything random, 16+ chars"
+                  className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 font-mono"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  onClick={() => setMetaAppOpen(false)}
+                  disabled={metaAppSaving}
+                  className="px-4 py-2 rounded-lg text-sm text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={saveMetaApp}
+                  disabled={metaAppSaving}
+                  className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 disabled:opacity-50 transition-opacity"
+                >
+                  {metaAppSaving ? "Saving..." : "Save"}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
