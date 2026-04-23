@@ -6,10 +6,8 @@
 #   lockdown-check     — refuse to deploy if docker-compose exposes a public port
 #   lint-python        — ruff on app/
 #   test-python        — pytest tests/
-#   lint-admin         — eslint on admin/
-#   lint-frontend      — eslint on frontend/
-#   typecheck-admin    — tsc --noEmit on admin/
-#   typecheck-frontend — tsc --noEmit on frontend/
+#   check-admin        — eslint + tsc on admin/
+#   check-frontend     — eslint + tsc on frontend/
 #
 #   [deploy chain — only runs on push to main, sequentially]
 #   sync-code    — pull latest onto the host
@@ -86,46 +84,29 @@ steps:
     depends_on: []
     <<: *quality_gate
 
-  lint-frontend:
+  # Note: lint and typecheck are combined per project because Woodpecker's
+  # workspace is shared across steps in the same pipeline. Running two
+  # parallel `npm install` against the same node_modules corrupts the tree
+  # (napi-postinstall races, ENOTEMPTY on rmdir, missing caniuse-lite files).
+  # One step per project = one install, both checks.
+  check-frontend:
     image: *node_image
     commands:
       - cd frontend
-      # TODO: commit package-lock.json in frontend/ and admin/, then
-      # switch to `npm ci` for reproducible + faster installs.
+      # TODO: commit package-lock.json and switch to `npm ci`.
       - npm install --no-audit --no-fund --prefer-offline
       - npm run lint
-    depends_on: []
-    <<: *quality_gate
-
-  lint-admin:
-    image: *node_image
-    commands:
-      - cd admin
-      # TODO: commit package-lock.json in frontend/ and admin/, then
-      # switch to `npm ci` for reproducible + faster installs.
-      - npm install --no-audit --no-fund --prefer-offline
-      - npm run lint
-    depends_on: []
-    <<: *quality_gate
-
-  typecheck-frontend:
-    image: *node_image
-    commands:
-      - cd frontend
-      # TODO: commit package-lock.json in frontend/ and admin/, then
-      # switch to `npm ci` for reproducible + faster installs.
-      - npm install --no-audit --no-fund --prefer-offline
       - npx tsc --noEmit
     depends_on: []
     <<: *quality_gate
 
-  typecheck-admin:
+  check-admin:
     image: *node_image
     commands:
       - cd admin
-      # TODO: commit package-lock.json in frontend/ and admin/, then
-      # switch to `npm ci` for reproducible + faster installs.
+      # TODO: commit package-lock.json and switch to `npm ci`.
       - npm install --no-audit --no-fund --prefer-offline
+      - npm run lint
       - npx tsc --noEmit
     depends_on: []
     <<: *quality_gate
@@ -144,10 +125,8 @@ steps:
       - check-migrations
       - lint-python
       - test-python
-      - lint-frontend
-      - lint-admin
-      - typecheck-frontend
-      - typecheck-admin
+      - check-frontend
+      - check-admin
     <<: *deploy_only
 
   backup-db:
@@ -253,10 +232,8 @@ steps:
       - check-migrations
       - lint-python
       - test-python
-      - lint-frontend
-      - lint-admin
-      - typecheck-frontend
-      - typecheck-admin
+      - check-frontend
+      - check-admin
       - sync-code
       - tag-prev
       - backup-db
@@ -280,10 +257,8 @@ steps:
       - check-migrations
       - lint-python
       - test-python
-      - lint-frontend
-      - lint-admin
-      - typecheck-frontend
-      - typecheck-admin
+      - check-frontend
+      - check-admin
       - sync-code
       - tag-prev
       - backup-db
